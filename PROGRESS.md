@@ -73,17 +73,30 @@ Read this first in every session. Newest status at the top of each section.
   not offered: the iPhone 15's DisplayPort output is 60 Hz, and the engine's smoothing limit is 62.
 - Encrypted build cache works: 12 GB build folder (8.8 GB of it Mac shader libraries) → 1.7 GB archive in the Actions cache.
 
-### Where the session of 2026-11-12 ~06:10 stopped (usage limit), pick up here
+### Run 43163917332 (run 8, command-memory fix) and what followed, 2026-11-12
 
-- Boot run **43163917332** (Mac, null GPU, with the command-memory fix) was dispatched and not read yet:
-  `scripts/rl/wait_run.sh 43163917332`, then `scripts/rl/analyze_run.py ../RL/ci/43163917332`. Look for the line
-  "command memory added over a recording's open piece" (fix taken) and any red "runs past its piece".
-- iOS build run **43161430713** (platform=ios, astc_pack.sh) was still building: read it, then verify `scripts/fetch_ipa.sh`.
-- Simulator run 43162754056 finished; its output is in the last lines of this session's log, re-check with
-  `scripts/rl/wait_sim.sh 43162754056`.
-- `hle_perf.c`: `DM_PERF_EXPORT` now rewrites its files every 10 s (pushed without a compile check: watch "RL compile check").
-- Next: boot with `game_args` a map URL (`Stadium_P?Game=TAGame.GameInfo_Soccar_TA?GameTags=BotsMedium`; main imports
-  `nn::os::GetHostArgv`), add `DM_PERF_EXPORT=perf` to `run_env`, then benchmark → `docs/perf/`, A16 estimate, REPORT.md, audit.
+- **Boots and holds**: ran its whole 240 s, 5,700 frames, no crash; peak 2,406 MiB of the 4,000 budget (Metal 1,222 MiB).
+  The fix's line appears twice (56-byte pieces kept); no "runs past its piece". 142 draws a frame on a screen that did not
+  change with A presses (which screen is unknown: no picture on the null GPU, and the game's own log is not captured yet).
+- **~26 fps with 45 % of one core in use**: the game thread sleeps in the engine's limiter. Cause: UE3's frame-rate
+  smoothing (`UEngine::GetMaxTickRate`, `main+0x40f074`) limits each frame to the running average of the last 300 frame
+  times, clamped to Min 22 / Max 62 (`[GEngine]+0x758` / `+0x754`, GEngine = `[main+0x2e0ca40]`); a wait that overshoots
+  lowers the average for good. Fix: `DM_UE3_SMOOTH` (default `steady`) writes Min = Max, so the limit is a flat 62 and the
+  display paces the frames (`hle_ue3set.c k_smooth`, keyed by build). Setting "Frame-rate smoothing" in the panel.
+- **The engine settings table was never found** ("no system settings table in main"): the row named ScreenPercentage
+  points into the tail of the string "UpscaleScreenPercentage" (merged by the linker), which the search excluded. Fixed and
+  checked against the relocated image on the laptop (row at main+0x2a4e5d8 passes every check).
+- **The 1.0 game renders 1280x720** (window made 1280x720; the 1080p docked mode came in a later update). Owner's
+  target (2026-11-12): **native 1440p at 60 fps first**, upscaling only as the fallback. The engine sizes its window,
+  viewport and render targets from the system settings `ResX` / `ResY` (`main+0xab43cc` → `main+0xab4f1c`), which it also
+  reads from its command line (`ResX=` / `ResY=`, `main+0x42b850`). New setting **Render resolution** (`DM_UE3_RES`,
+  game / 1080p / 1440p): the host holds ResX / ResY from `nvnDeviceInitialize` on, before the window is made.
+  To confirm in CI: the WindowInitialize line says 2560x1440, the game's fixed pools cope, memory stays under 4,000 MiB.
+- CI: `rl-build.yml` runs no longer share a concurrency group (a waiting run was being replaced by the next dispatch).
+- `DM_PROBE` prints UTF-32 texts now; the game's log function is `main+0xe2b5c` (`Logf(this, format, …)`), so
+  `DM_PROBE=main:0xe2b5c DM_PROBE_LIMIT=600` shows what the game logs.
+- In flight: 43166521864 (1440p, A presses), 43166579317 (map URL on the command line:
+  `Stadium_P?Game=TAGame.GameInfo_Soccar_TA?GameTags=BotsMedium`), iOS build 43161430713.
 
 ## CI loops (all manual-dispatch or push to main; logs with game data are encrypted)
 
