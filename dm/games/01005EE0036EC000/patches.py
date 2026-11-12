@@ -27,10 +27,41 @@ def kick_gate(ctx):
     ctx.put(_KICK, [B(_KICK, start)], "RHIKickCommandBuffer returns at once while the host's flag is set (the frame's passes stay open across the renderer's kicks)")
 
 
-STUBS = {'becfed979bb4204fbd0945cd450fb296': kick_gate}   # 1.0.0 (v0) main
+# 1.0.0 (v0) main: the RHI's memory pool of render targets ("Targets", pool 2), made at start with a fixed size (main+0xab4698: mov w1, #0x11e10000, 286 MB, sized for the
+# game's own 1280x720). With the engine's ResX / ResY held at 2560x1440 (the player's Render resolution, hle_ue3set.c) the scene's targets are four times the size, the pool
+# runs out and the texture's storage comes back null (run 43172097281: a fault at main+0xa9ca88 reading it). The size follows ResX, which the host holds before the pools are
+# made (nvnDeviceInitialize comes first in the same function): above 1280 across 656 MB (2.25 x the pixels of 720p), above 1920 across 1,152 MB (4 x). The pool is address
+# space of the game's heap until targets are made in it.
+_POOL, _POOL_FIRST, _RESX = 0xab4698, '213ca252', 0x2e2b1d0
+
+
+def target_pool(ctx):
+    here, emit = ctx.here, ctx.emit
+    ctx.site(_POOL, _POOL_FIRST)
+    start = here()
+    movz = lambda imm16: 0x52A00000 | imm16 << 5 | 1                 # movz w1, #imm16, lsl #16
+    cmp16 = lambda imm: 0x7100001F | imm << 10 | 16 << 5              # cmp w16, #imm
+    ble = lambda words: 0x54000000 | words << 5 | 0xd                 # b.le +words
+    emit(ADRP(16, here(), _RESX))                                    # adrp x16, page of ResX   (x16 is dead here: arguments are being set for a call)
+    emit(0xB9400000 | ((_RESX & 0xfff) // 4) << 10 | 16 << 5 | 16)   # ldr w16, [x16, #0x1d0]
+    emit(movz(0x11e1))                                               # the game's own size
+    emit(cmp16(1280)); emit(ble(5))
+    emit(movz(0x2900))                                               # 656 MB
+    emit(cmp16(1920)); emit(ble(2))
+    emit(movz(0x4800))                                               # 1,152 MB
+    emit(B(here(), _POOL + 4))
+    ctx.put(_POOL, [B(_POOL, start)], "the render-target pool's size follows the held ResX (286 MB at 720p, 656 MB above it, 1,152 MB above 1080p)")
+
+
+def stubs(ctx): kick_gate(ctx); target_pool(ctx)
+
+
+STUBS = {'becfed979bb4204fbd0945cd450fb296': stubs}   # 1.0.0 (v0) main
 
 # How general each patch is and could be (dm/tools/docs_patches.py "Binding", listed in docs/agents/game-patches.md)
 BINDING = [
+    {'what': "the render-target pool's size follows the held ResX", 'now': 'build', 'goal': 'game', 'purpose': 'memory',
+     'why': "the port's own pool sizes, constants in its RHI start"},
     {'what': "RHIKickCommandBuffer returns at once while the host's flag is set", 'now': 'build', 'goal': 'engine', 'purpose': 'rendering',
      'why': "Unreal Engine 3's kick in Panic Button's NVN RHI; a function-matched rule could carry it to the game's updates"},
 ]
