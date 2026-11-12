@@ -47,6 +47,8 @@ jobs:
           echo "UDID=$UDID" >> "$GITHUB_ENV"
           xcrun simctl boot "$UDID" || true
           xcrun simctl bootstatus "$UDID" -b | tail -1
+      # One of upstream's own tests is left out: testInactiveNativeDivisionCanDriveSeparatedLayout (a folding iPhone's hinge) fails on this runner's Simulator with upstream's
+      # unmodified sources too (run 43161148508 on the throwaway branch upstream-sim-check: 36 tests, that 1 failure), alone as well as in the suite. Not this port's code.
       - name: Build and test the harness
         run: |
           rm -rf /tmp/rl-sim-shots; mkdir -p /tmp/rl-sim-shots logs
@@ -54,7 +56,8 @@ jobs:
           xcodegen generate --spec project.yml >/dev/null
           set -o pipefail
           xcodebuild test -project DuoHarness.xcodeproj -scheme DuoHarness -destination "platform=iOS Simulator,id=$UDID" \
-            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO -resultBundlePath "$RUNNER_TEMP/duo.xcresult" 2>&1 | tee "$GITHUB_WORKSPACE/logs/xcodebuild.log" \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO -resultBundlePath "$RUNNER_TEMP/duo.xcresult" \
+            -skip-testing:DuoHarnessTests/DuoHarnessTests/testInactiveNativeDivisionCanDriveSeparatedLayout 2>&1 | tee "$GITHUB_WORKSPACE/logs/xcodebuild.log" \
             | grep -E "error:|warning: unused|Test Case .*(passed|failed)|\*\* TEST|Executed [0-9]+ tests|: error|XCTAssert|failed -" | head -300
       - name: A failing test again, alone (does it depend on the tests before it?)
         if: failure()
