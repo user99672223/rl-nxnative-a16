@@ -17,6 +17,9 @@ Addresses are offsets into the 1.0 `main` (build `becfed979bb4204fbd0945cd450fb2
 | 5 | The game's dynamic resolution | Dynamic resolution (`DM_UE3_DYNRES`, `DM_UE3_DYNRES_MIN`) | game's own | built, effect pending |
 | 6 | Anisotropic filtering level | Anisotropic filtering (`DM_ANISO`) | game's own | built |
 | 7 | Any engine system setting by name | `DM_UE3S_<Setting>`, `DM_UE3_SET` | game's own | built |
+| 8 | Native render resolution (the engine's `ResX` / `ResY`) | Render resolution (`DM_UE3_RES`) | game's own (720p) until measured | built, run pending |
+| 9 | The engine's frame-rate smoothing held flat | Frame-rate smoothing (`DM_UE3_SMOOTH`) | steady | built, run pending |
+| 10 | Frame rate 30 / 60 by the present interval | Frame rate (`DM_FPS_TARGET`) | 60 | built |
 
 (The table grows as the benchmark gives numbers; entries below are complete only where they say "measured".)
 
@@ -44,7 +47,7 @@ Addresses are offsets into the 1.0 `main` (build `becfed979bb4204fbd0945cd450fb2
 
 ## 3. Output at 1440p
 
-**Found.** Upstream caps a TV's drawable at 1920 across. The game renders at most 1920x1080 docked (dynamic resolution below that).
+**Found.** Upstream caps a TV's drawable at 1920 across. The 1.0 game renders 1280x720 in both console modes, with a dynamic resolution below that (its 1080p mode came in a later update); see item 8 for rendering natively at the monitor's size.
 
 **Changed.** Monitor output (`DM_TV_WIDTH`: 1080p, 1440p, 4K, the display's own) sets the widest drawable on the external screen; the display is asked for its 16:9 mode of that width (`front_ios.m` `tv_pick_mode`), and the present scales the game's picture to it: Standard (bilinear) or MetalFX's spatial scaler where `MTLFXSpatialScalerDescriptor supportsMetal4FX` says the GPU has it (`nvn_mtl.m` `fx_encode`, upstream's). The drawable's size is set explicitly.
 
@@ -57,3 +60,25 @@ Addresses are offsets into the 1.0 `main` (build `becfed979bb4204fbd0945cd450fb2
 **Changed.** Render scale (`DM_UE3_SCALE`, 50 to 100 %) holds `ScreenPercentage` and turns the game's dynamic resolution off below 100 %; Dynamic resolution (`DM_UE3_DYNRES`) and its floor (`DM_UE3_DYNRES_MIN`); Anisotropic filtering (`DM_ANISO`) overrides the level of every trilinear sampler in the graphics layer; `DM_UE3S_<Setting>` / `DM_UE3_SET` hold any row by name (`MotionBlur`, `Bloom`, `DepthOfField`, `AmbientOcclusion`, `bAllowLightShafts`, `LensFlares`, `DynamicShadows`, `MaxShadowResolution`, ...).
 
 **Effect.** Pending the benchmark.
+
+## 8. Native render resolution
+
+**Found.** The engine sizes its window, its viewport and every scene render target from two system settings, `ResX` and `ResY` (RHI start `main+0xab43cc` → window `main+0xab4f1c`; the game engine's start also reads `ResX=` / `ResY=` from the command line, `main+0x42b850`). The 1.0 game's config gives 1280x720. So the picture a 1440p monitor gets is a 720p picture scaled 2x each way unless the engine itself is told a larger size.
+
+**Changed.** Render resolution (`DM_UE3_RES`: the game's own, 1920x1080, 2560x1440) holds `ResX` / `ResY` from the moment the game makes its NVN device, before the window exists (`hle_ue3set.c` `dm_ue3set_early`, called from `nvnDeviceInitialize`). Nothing in the game's code is patched. It takes a restart, as the engine reads the size once.
+
+**Cost, expected.** 4x the pixels of 720p in every full-screen pass, and render targets 4x the size in the game's fixed texture pool. Measured numbers follow below once the benchmark has run at each size.
+
+## 9. Frame-rate smoothing
+
+**Found.** With `bSmoothFrameRate` (on in this game's config) Unreal's `GetMaxTickRate` (`main+0x40f074`) returns the running average of the last 300 frame times as the frame-rate limit, kept between `MinSmoothedFrameRate` 22 and `MaxSmoothedFrameRate` 62, and the frame limiter (`main+0xae6154`) sleeps each frame out to it. Since every frame is held to the average, no frame can be shorter than the average: a wait that overshoots, or one slow stretch, lowers the limit and nothing raises it again. **Measured:** on the CI Mac the game settled at 25.9 fps with the game thread asleep in the limiter and 45 % of one core in use (run 43163917332; thread dump: game thread in `main+0xae7768`, last call a sleep).
+
+**Changed.** Frame-rate smoothing = Steady (`DM_UE3_SMOOTH`, the default) writes the minimum to the maximum each frame, so the limit is a flat 62 fps, the game's own ceiling, and the display's vsync sets the pace. "Game's own" puts the minimum back. The offsets are of this build (`hle_ue3set.c` `k_smooth`).
+
+**Risk.** None seen for game speed: the engine steps by measured time and the physics by its own 120 Hz steps.
+
+## 10. Frame rate 30 / 60
+
+**Found.** The game asks NVN for present interval 1 and steps by the time that passed; the physics runs fixed 120 Hz steps inside each tick (`PhysicsFramerate=120`, `MaxPhysicsSubsteps=5`), so the game's speed is right at any frame rate down to 24 fps.
+
+**Changed.** Profile keys `fps_target 60` and `present_interval display`: the player's Frame rate (30 or 60) is applied as the present interval alone. No "unlocked": an iPhone 15's DisplayPort output is 60 Hz, and the engine's ceiling is 62.
