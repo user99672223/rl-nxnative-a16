@@ -47,6 +47,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Fixed file times
+        # The packing script keys its reusable stages by the size and modification time of some tool folders (the shader translator's binaries); a fresh checkout stamps
+        # every file with the time of the checkout, which made every run compile all 66,362 shaders again. One fixed time for every tracked file keeps the keys the same
+        run: git ls-files -z | xargs -0 touch -t 202601010000
       - name: Paths
         run: |
           {
