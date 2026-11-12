@@ -268,8 +268,12 @@ static void tv_pick_mode(UIScreen *screen, CGFloat cap) {
     if (!best) best = screen.preferredMode;
     CGSize was = screen.currentMode.size;
     if (best && best != screen.currentMode) screen.currentMode = best;
-    LOG("front end: display modes:%s; asked for %.0fx%.0f (was %.0fx%.0f, output cap %.0f)", list.UTF8String, best.size.width, best.size.height, was.width, was.height, cap);
+    // The refresh rate is the screen's, not a mode's (UIScreenMode has none): what the phone drives this display at, logged since no source says whether an iPhone 15
+    // goes above 60 Hz at 2560x1440 on a faster monitor
+    LOG("front end: display modes:%s; asked for %.0fx%.0f (was %.0fx%.0f, output cap %.0f); the display refreshes at up to %ld Hz", list.UTF8String, best.size.width, best.size.height, was.width, was.height, cap, (long)screen.maximumFramesPerSecond);
 }
+// The refresh rate of the screen the game's picture is on (the monitor when one is connected), for the diagnostic panel and the performance log
+int dm_display_hz(void) { UIScreen *s = g_tv ? g_tv.windowScene.screen : UIScreen.mainScreen; return (int)s.maximumFramesPerSecond; }
 // ---- The diagnostic panel (DiagPanel.swift): the phone's whole screen while the picture is on a TV and a controller is connected, else an overlay at the right ----
 void *dm_diag_panel_vc(bool fullScreen); void dm_diag_set_fullscreen(bool on);
 static UIViewController *g_diag;

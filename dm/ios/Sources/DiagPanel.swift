@@ -152,7 +152,7 @@ struct DiagPanelView: View {
                 }
                 HStack {
                     Figure(title: "Game renders", value: diag.sum.render_w > 0 ? "\(diag.sum.render_w) × \(diag.sum.render_h)" : "–")
-                    Figure(title: "Shown at", value: diag.sum.out_w > 0 ? "\(diag.sum.out_w) × \(diag.sum.out_h)" : "–")
+                    Figure(title: "Shown at", value: diag.sum.out_w > 0 ? "\(diag.sum.out_w) × \(diag.sum.out_h), \(dm_display_hz()) Hz" : "\(dm_display_hz()) Hz")
                     Figure(title: "Thermal state", value: diag.thermalText)
                 }
                 VStack(alignment: .leading, spacing: 3) {

@@ -13,6 +13,7 @@ void dm_pad_layout_set(int layout);   // releases every touch first, and is save
 void dm_gamepad_touch_feedback(bool on);   // DM_TOUCH_HAPTICS
 void dm_diag_show(bool on);   // front_ios.m: the diagnostic panel (DiagPanel.swift) over the game, or on the phone's whole screen while a TV shows the picture
 bool dm_diag_shown(void);
+int dm_display_hz(void);       // front_ios.m: the refresh rate of the screen the picture is on (the monitor's when one is connected)
 bool dm_tv_connected(void);   // a TV or monitor shows the picture
 bool dm_setting_live(const char *env, const char *value);   // front_ios.m: value NULL asks whether the running game takes env at once; otherwise applies it
 #ifdef __cplusplus
