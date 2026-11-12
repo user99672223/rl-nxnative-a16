@@ -14,6 +14,9 @@ on:
       run_script:
         description: script under scripts/rl/ci_runs/ to run after the build (optional)
         default: ''
+      use_cache:
+        description: restore the encrypted build cache (yes | no)
+        default: 'yes'
       run_seconds:
         description: seconds the run script lets the game run
         default: '120'
@@ -52,6 +55,7 @@ jobs:
             echo "RL_KEYS=$RUNNER_TEMP/rl-secret/prod.keys"
             echo "RL_OUT=$RUNNER_TEMP/rl-out"
             echo "RL_UPLOAD=$RUNNER_TEMP/rl-upload"
+            echo "RL_CACHE_DIR=$RUNNER_TEMP/rl-cache"
           } >> "$GITHUB_ENV"
       - name: Runner facts (no game data)
         run: |
@@ -71,6 +75,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RL_INPUTS_AGE_KEY: ${{ secrets.RL_INPUTS_AGE_KEY }}
         run: scripts/rl/ci_fetch_inputs.sh
+      - name: Cached build (encrypted)
+        if: inputs.use_cache != 'no'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/rl-cache
+          key: rl-build-${{ inputs.platform }}-${{ github.run_number }}
+          restore-keys: rl-build-${{ inputs.platform }}-
+      - name: Restore the cached build
+        if: inputs.use_cache != 'no'
+        run: scripts/rl/ci_cache.sh restore
       - name: Build
         id: build
         continue-on-error: true
@@ -90,6 +104,14 @@ jobs:
         run: |
           case "$RUN_SCRIPT" in *[!a-zA-Z0-9_.-]*) echo "bad script name"; exit 1;; esac
           scripts/rl/ci_step.sh run bash "scripts/rl/ci_runs/$RUN_SCRIPT"
+      - name: Archive the build for the cache (encrypted)
+        if: always()
+        run: scripts/rl/ci_cache.sh save
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ${{ runner.temp }}/rl-cache
+          key: rl-build-${{ inputs.platform }}-${{ github.run_number }}
       - name: Collect and encrypt outputs
         if: always()
         run: |
@@ -107,4 +129,4 @@ jobs:
           retention-days: 14
       - name: Delete decrypted files
         if: always()
-        run: rm -rf "$RL_SECRET_DIR" "$RL_GAME_DIR" "$RL_OUT" "$RL_UPLOAD"
+        run: rm -rf "$RL_SECRET_DIR" "$RL_GAME_DIR" "$RL_OUT" "$RL_UPLOAD" "$RL_CACHE_DIR"
