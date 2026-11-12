@@ -133,7 +133,7 @@ static id g_rx_cb, g_rx_enc;   // the encode thread's real command buffer and op
 static void rec_exec(const rec_t *r) {
     const uint64_t *a = r->a; id e = g_rx_enc;
     switch (r->op) {
-    case RO_CB_NEW: g_rx_cb = [g_dev newCommandBuffer]; break;
+    case RO_CB_NEW: g_rx_cb = [DEV4 newCommandBuffer]; break;
     case RO_CB_BEGIN: [(id<MTL4CommandBuffer>)g_rx_cb beginCommandBufferWithAllocator:rec_id(a[0])]; break;
     case RO_CB_END: [(id<MTL4CommandBuffer>)g_rx_cb endCommandBuffer]; break;
     case RO_CB_BLOCK: ((void (^)(id<MTL4CommandBuffer>))rec_id(a[0]))(g_rx_cb); break;
@@ -357,7 +357,7 @@ static inline id rec_table_real(id t) { return [t isKindOfClass:[DmRecTable clas
 @end
 
 // The replay's entry points
-static id rec_cb_new(void) { if (!rec_on()) return [g_dev newCommandBuffer]; rec_put(RO_CB_NEW, 0); return [DmRecCB new]; }
+static id rec_cb_new(void) { if (!rec_on()) return [DEV4 newCommandBuffer]; rec_put(RO_CB_NEW, 0); return [DmRecCB new]; }
 // Work a framework encodes itself (MetalFX's scalers) needs the real command buffer: on the encoding thread, in order with the recorded encoders
 static void rec_cb_block(id cb, void (^block)(id<MTL4CommandBuffer>)) {
     if ([cb isKindOfClass:[DmRecCB class]]) rec_put(RO_CB_BLOCK, 1)->a[0] = rec_obj([block copy]);
