@@ -33,7 +33,7 @@ jobs:
           xcodebuild -downloadComponent MetalToolchain >/dev/null 2>&1 || true
           make -C dm/host GAME="$GAME" -j3 dmhost 2>&1 | tee host.log | grep -E "error|warning: .*(nvn_null|memstat|hle_net|hle_offline|nvn_bcsub|rl_)|^make|Error" | head -150
           test "${PIPESTATUS[0]}" = 0 && test -x dm/host/dmhost
-      - name: Null GPU smoke (a host with no game: must stop at the missing modules, not at the Metal device)
+      - name: "Null GPU smoke (a host with no game must stop at the missing modules, not at the Metal device)"
         run: |
           DM_NVN_NULL=1 perl -e 'alarm 20; exec @ARGV' dm/host/dmhost /nonexistent 2>&1 | head -20 || true
       - name: iOS host sources for the iPhone SDK
