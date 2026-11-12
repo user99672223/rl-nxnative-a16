@@ -1,0 +1,101 @@
+# Rocket League port: builds and runs the game on a macOS runner from the age-encrypted inputs.
+# Hard rules: manual trigger only; nothing derived from the game is printed; every output is encrypted to the
+# owner's laptop key before upload; decrypted files are deleted at the end.
+name: RL build
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: mac | mac-app | ios
+        default: mac
+      extra:
+        description: extra arguments for build_ipa_from_nsp.py
+        default: ''
+      run_script:
+        description: script under scripts/rl/ci_runs/ to run after the build (optional)
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rl-build-${{ github.ref }}-${{ inputs.platform }}-${{ inputs.run_script }}
+  cancel-in-progress: false
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+  GAME: 01005EE0036EC000
+  HOMEBREW_NO_AUTO_UPDATE: 1
+
+jobs:
+  build:
+    if: github.repository_owner == github.actor
+    runs-on: xcode-27
+    timeout-minutes: 350
+    permissions:
+      contents: write   # the encrypted inputs are assets of a draft release, which a read-only token cannot see
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Paths
+        run: |
+          {
+            echo "RL_SECRET_DIR=$RUNNER_TEMP/rl-secret"
+            echo "RL_GAME_DIR=$RUNNER_TEMP/rl-game"
+            echo "RL_KEYS=$RUNNER_TEMP/rl-secret/prod.keys"
+            echo "RL_OUT=$RUNNER_TEMP/rl-out"
+            echo "RL_UPLOAD=$RUNNER_TEMP/rl-upload"
+          } >> "$GITHUB_ENV"
+      - name: Runner facts (no game data)
+        run: |
+          sw_vers; xcodebuild -version; sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize; df -h / | tail -1
+          swiftc -O scripts/rl/metal_probe.swift -o "$RUNNER_TEMP/metal_probe" 2>/dev/null && "$RUNNER_TEMP/metal_probe" || echo "metal probe failed"
+      - name: Tools
+        run: |
+          brew install age xcodegen zstd glslang >/dev/null 2>&1 || brew install age xcodegen zstd glslang
+          xcodebuild -downloadComponent MetalToolchain >/dev/null 2>&1 || true
+          xcrun metal --version
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
+      - run: python -m pip -q install lz4 "capstone>=5,<6" fonttools nsz zbic
+      - name: Fetch and decrypt the inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RL_INPUTS_AGE_KEY: ${{ secrets.RL_INPUTS_AGE_KEY }}
+        run: scripts/rl/ci_fetch_inputs.sh
+      - name: Build
+        id: build
+        continue-on-error: true
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          EXTRA: ${{ inputs.extra }}
+        run: |
+          # shellcheck disable=SC2086
+          scripts/rl/ci_step.sh build python scripts/build_ipa_from_nsp.py "$RL_GAME_DIR" -k "$RL_KEYS" --platform "$PLATFORM" --progress lines $EXTRA
+      - name: Run
+        if: inputs.run_script != ''
+        continue-on-error: true
+        env:
+          RUN_SCRIPT: ${{ inputs.run_script }}
+        run: |
+          case "$RUN_SCRIPT" in *[!a-zA-Z0-9_.-]*) echo "bad script name"; exit 1;; esac
+          scripts/rl/ci_step.sh run bash "scripts/rl/ci_runs/$RUN_SCRIPT"
+      - name: Collect and encrypt outputs
+        if: always()
+        run: |
+          mkdir -p "$RL_OUT/survey" "$RL_OUT/profile"
+          cp -R "$RL_GAME_DIR"/*_survey/. "$RL_OUT/survey/" 2>/dev/null || true
+          cp -R "$RL_GAME_DIR"/*_build/profile/. "$RL_OUT/profile/" 2>/dev/null || true
+          ( cd "$RL_GAME_DIR" 2>/dev/null && { du -sh ./* ./*_build/* 2>/dev/null; df -h /; } ) > "$RL_OUT/logs/sizes.txt" 2>&1 || true
+          scripts/rl/ci_pack_out.sh "rl-${{ inputs.platform }}-${{ github.run_number }}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rl-enc-${{ inputs.platform }}-${{ github.run_number }}
+          path: ${{ runner.temp }}/rl-upload
+          retention-days: 14
+      - name: Delete decrypted files
+        if: always()
+        run: rm -rf "$RL_SECRET_DIR" "$RL_GAME_DIR" "$RL_OUT" "$RL_UPLOAD"
