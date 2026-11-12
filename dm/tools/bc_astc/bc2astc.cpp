@@ -156,10 +156,12 @@ int main(int argc, char **argv) {
     FILE *o = fopen(argv[1], "wb"); if (!o) { perror("pack"); return 1; }
     uint32_t cnt = (uint32_t)uniq.size(), zero = 0; uint64_t base = 16 + (uint64_t)cnt * 32;
     fwrite("DMBCA1\0\0", 1, 8, o); fwrite(&cnt, 4, 1, o); fwrite(&zero, 4, 1, o);
-    for (auto e : uniq) { e.off += base; fwrite(&e, 32, 1, o); }
-    rewind(g_data); std::vector<uint8_t> buf(1 << 20); size_t n; while ((n = fread(buf.data(), 1, buf.size(), g_data)) > 0) fwrite(buf.data(), 1, n, o);
+    // the blocks in entry order, whatever order the threads finished in: the same input gives the same file
+    { uint64_t at = base; for (auto e : uniq) { e.off = at; at += e.len; fwrite(&e, 32, 1, o); } }
+    std::vector<uint8_t> buf;
+    for (auto &e : uniq) { buf.resize(e.len); if (fseeko(g_data, (off_t)e.off, SEEK_SET) || fread(buf.data(), 1, e.len, g_data) != e.len || fwrite(buf.data(), 1, e.len, o) != e.len) { fprintf(stderr, "[RED] bc2astc: cannot copy an entry's blocks\n"); return 1; } }
     fclose(o); fclose(g_data); remove(tmp.c_str());
-    fprintf(stderr, "bc2astc: %llu textures, %llu levels in, %u entries, %.1f MB of ASTC blocks\n", (unsigned long long)njobs, (unsigned long long)nlev, cnt, g_data_len / 1048576.0);
+    { uint64_t kept = 0; for (auto &e : uniq) kept += e.len; fprintf(stderr, "bc2astc: %llu textures, %llu levels in, %u entries, %.1f MB of ASTC blocks\n", (unsigned long long)njobs, (unsigned long long)nlev, cnt, kept / 1048576.0); }
     static const char *const mn[3] = {"colour", "normal map (green, alpha)", "normal map (RGB)"};
     for (int m = 0; m < 3; m++) fprintf(stderr, "bc2astc: %s: 6x6 %llu, 5x5 %llu, 4x4 %llu textures (PSNR floor %.0f dB)\n", mn[m], (unsigned long long)g_pick[m][6].load(), (unsigned long long)g_pick[m][5].load(), (unsigned long long)g_pick[m][4].load(), g_psnr_min[m]);
     return 0;
