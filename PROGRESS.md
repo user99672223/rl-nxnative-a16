@@ -62,6 +62,35 @@ Read this first in every session. Newest status at the top of each section.
 - CI runner (`xcode-27`): macOS 27.0.1, Xcode 27.2, "Apple M1 (Virtual)", 3 cores, 7 GB RAM, 36 GB free disk.
   GPU "Apple Paravirtual device": BC yes, family mac2 yes, **metal3 no, metal4 no**, no counter sets.
 
+## Analysis notes (Ghidra project `../RL/01005EE0036EC000-work/ghidra/proj`, helpers `tools/gh.sh xrefs|dec <main offsets>`)
+
+Addresses are offsets into the 1.0 `main` (build `becfed97…`). Decompiled text stays in the work folder (never committed).
+
+- **System settings table** (UE3 `FSystemSettings` descriptors): `main+0x2a4da08`, 101 entries of 48 bytes
+  `{u32 type (2 int, 4 float, 5 bool), u32 flags, name*, variable*, range*, help*, 0}`. Every setting's global is in bss
+  `main+0x2e2adb8…+0x2e2b214`. The ones that matter for performance:
+  `ScreenPercentage +0x2e2b1b0 (float)`, `UseVsync +0x2e2b1ac`, `UpscaleScreenPercentage +0x2e2b1b4`,
+  `UpscaleTargetFramerateDocked +0x2e2b1b8 (float)`, `UpscaleTargetFramerateUndocked +0x2e2b1bc (float)`,
+  `MinimumScreenScale +0x2e2b1c0 (float)`, `AllowDynamicResolution +0x2e2b1c4`, `MaxAnisotropy +0x2e2b1a4`,
+  `MaxMultiSamples +0x2e2b1e4`, `DetailMode +0x2e2adb8`, `DynamicShadows +0x2e2ae88`, `MaxShadowResolution +0x2e2ae9c`,
+  `MinShadowResolution +0x2e2ae94`, `ShadowTexelsPerPixel +0x2e2aea4`, `MotionBlur +0x2e2ade8`, `DepthOfField +0x2e2adf0`,
+  `AmbientOcclusion +0x2e2adf4`, `Bloom +0x2e2adf8`, `bAllowLightShafts +0x2e2adfc`, `LensFlares +0x2e2ae10`,
+  `Distortion +0x2e2ae00`, `ParticleLODBias +0x2e2ae24`, `OneFrameThreadLag +0x2e2ae1c`, `AllowPerFrameSleep +0x2e2b20c`,
+  `AllowPerFrameYield +0x2e2b210`, `ResX/ResY +0x2e2b1d0/+0x2e2b1d4`. Full list: work folder `survey/system_settings.tsv`.
+  Plan: the host writes these globals (profile table name → offset/type), each exposed as a panel toggle.
+- **Dynamic resolution controller**: `main+0x417f80`. Reads `UpscaleTargetFramerateDocked/Undocked`, compares the target
+  frame time with a measured one (`main+0x2f382ec`), steps an index (`+0xaa8` of the object at `*main+0x2e0cdd0`) through a
+  resolution table ("ScreenPercentageMap"), posts "Change_Resolution", and switches `nn::oe::SetPerformanceConfiguration`
+  (0x20003 / 0x20004 / 0x92220008). Gated by `AllowDynamicResolution` and the object's `+0x404/+0x414` flags.
+- **Frame limiter**: `main+0xae6154` (UE3 `appUpdateTimeAndHandleMaxTickRate`): calls the engine's `GetMaxTickRate`
+  (vtable `+0x290` of `*main+0x2e0ca40`), then sleeps (`main+0xaa20ec`) and spins on `nn::os::GetSystemTick` until
+  `1/MaxTickRate`; `AllowPerFrameSleep/Yield` are read here.
+- **Stats text** "Docked %3.2f fps" / "Undocked %3.2f fps": `main+0x413e64`.
+- Texture formats in the cooked data (36,710 unique mips): DXT1 0.98 GB, DXT5 1.38 GB (5,094 mips of DXT5 normal maps
+  `TC_NormalmapSwizzle`: x/y in alpha/green), A8R8G8B8 0.94 GB, G8, V8U8. No BC4/5/6/7. Mips are stored pre-swizzled
+  (block-linear, one level each); packages: tables AES-256-ECB, bodies Oodle chunks (first block `8C 0A`, tiny ones `8C 02`).
+- Shaders: 1,738 in `globalshadercache-nnx.bin`; material shaders inline in the packages (e.g. 3,265 in `tagame.xxx`).
+
 ## Done
 
 - Read nxnative README, AGENTS.md, docs/agents 01–03, 06.
