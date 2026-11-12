@@ -36,10 +36,30 @@ Read this first in every session. Newest status at the top of each section.
    cache keyed by the hash of each texture level's BC bytes → ASTC blob, looked up at upload; CPU decode fallback for misses.
 3. **Encrypted inputs key** is an age identity (see Layout), not an `age -p` passphrase.
 
-## Status
+## Status (updated 2026-11-12 ~05:55 local)
 
-- Phase 0 done (facts below; engine config still to decode). Phase 1 in progress: CI builds from the encrypted NSP
-  (run 2: survey + rewrite OK, shader split failed → fixed reader for RL's UE3 layout; run 3 in progress).
+- **Phase 0**: done (facts below).
+- **Phase 1** (boot on Mac in CI): the whole build works in CI from the encrypted NSP: extract, rewrite, shader split through
+  the game's own Oodle decoder, **66,362 shaders translated and compiled, 0 failed** (48 min on the runner), host built
+  (run 43150236700). It stops only at the pipeline prebuild, which needs Metal 4. Run 43153001707 is the first boot attempt
+  on the null GPU (`scripts/rl/ci_runs/boot.sh`); result pending. The real profile is now `dm/games/01005EE0036EC000/`.
+- **Phase 2** (A16): offline half done and measured (`dm/tools/ue3_astc.py` + `dm/tools/bc_astc/bc2astc.cpp`, host lookup
+  `dm/gfx/tex/nvn_bcsub.c`); host upload path not wired yet (needs the boot to see how the game uploads textures).
+  `NX_MEMORY_BUDGET_MB` watcher is in (`dm/host/memstat.m`).
+- **Phase 3** (output, panel, input): written, compiles for Mac and iPhone SDK; Simulator tests running in CI
+  (`.github/workflows/rl-ios-sim.yml`): diagnostic panel (`dm/ios/Sources/DiagPanel.swift`), performance record and export
+  (`dm/host/hle_perf.c`), monitor output with `DM_TV_WIDTH` up to 2560 and display-mode pick, DualSense mapping test.
+- **Phase 4** (performance): groundwork: system settings control (`dm/host/hle_ue3set.c`), anisotropy override (`DM_ANISO`),
+  analysis notes below. Benchmark route not written yet.
+- **Phase 5**: not started.
+
+## CI loops (all manual-dispatch or push to main; logs with game data are encrypted)
+
+| What | How | Time |
+|---|---|---|
+| Host compiles (Mac + iPhone SDK), no game data | push touching `dm/host`, `dm/gfx`, `dm/ios` → `scripts/rl/wait_compile.sh` | ~4 min |
+| iOS front end in the Simulator (XCTest harness + pictures) | push touching `dm/ios` → `scripts/rl/wait_sim.sh` | ~10 min |
+| Full game build / boot from the encrypted NSP | `gh workflow run rl-build.yml -f platform=mac -f run_script=boot.sh -f run_seconds=180 [-f run_env="K=V ..."]` → `scripts/rl/wait_run.sh <id>` → `../RL/ci/<id>/` | ~55 min cold; cache (encrypted, Actions cache) should cut it |
 
 ## Survey facts (Phase 0)
 
@@ -101,6 +121,25 @@ Addresses are offsets into the 1.0 `main` (build `becfed97…`). Decompiled text
   flat images `elf/main.bin`, `elf/sdk.bin`, disassembler `tools/rldis.py <module> <hex> <count>`.
 - CI: `.github/workflows/rl-build.yml` (manual dispatch) → `scripts/fetch_artifact.sh <run id>` decrypts results to `../RL/ci/<run>/`.
 
+## Texture pack measurements (laptop, full game, 2026-11-12)
+
+- `ue3_astc.py` over all 1,573 packages: 44,037 textures, 4,446 unique BC ones, 35,184 levels, 2.08 GB of BC blocks
+  → pack 1.43 GB (0.69x). 16 min on 8 cores (122 CPU-minutes).
+- Block size per texture = largest of 6x6 / 5x5 / 4x4 whose top level keeps the PSNR floor against the BC picture:
+  colour (floor 38 dB): 3,154 at 6x6, 373 at 5x5, 296 at 4x4; DXT5 normal maps x/y in A/G (40 dB): 198 / 105 / 257;
+  DXT1 normal maps (38 dB): 40 / 7 / 16. Sampled before choosing: DXT1 colour at 6x6 min 39–42 dB (3.56 bpp vs BC1's 4),
+  DXT1 normal maps at 5x5 only 27 dB (so they need 4x4), one DXT5 atlas at 6x6 only 28 dB (hence per-texture choice).
+- Keys verified: the pack's SHA-256 keys equal what `nvn_bcsub_key` computes; CPU decode matches a numpy reference within
+  rounding (max difference 2 of 255).
+- On the laptop the dev decoder (ooz) lacks the codec of tiny `8C 02` blocks (821 textures skipped); CI uses the game's own.
+
+## Offline audit (hard rule 1), 2026-11-12
+
+- The host opens no socket anywhere (`grep` for socket/connect/NSURLSession/CFNetwork/NWConnection over `dm/host`,
+  `dm/ios`, `dm/mac`, `dm/gfx`: none). Every `nn::socket` / `ssl` / `nifm` / `ldn` / `friends` entry the game imports is cut
+  to "no network" (`hle_net.c`, `hle_offline.c`; SDK 3's names added). The web view refuses any non-local URL.
+- Still to do: hide upstream's opt-in iCloud Drive "Cloud saves" in this build (it is a folder the OS syncs, off by default).
+
 ## Open problems / risks
 
 - nxnative's build (Metal shader compiler, xcodebuild) only runs on macOS → everything past the
@@ -108,7 +147,12 @@ Addresses are offsets into the 1.0 `main` (build `becfed97…`). Decompiled text
 - Upstream docs say GitHub's Macs have no Metal 4; whether the host can render there is unknown.
 - Local disk: 29 GB free at start.
 
-## Next step
+## Next steps (in order)
 
-- Read the first CI build's encrypted log (survey + provisional profile from `build_ipa_from_nsp.py --platform mac`),
-  move the profile into `dm/games/01005EE0036EC000/`, iterate on boot.
+1. Read run 43153001707's `run/host.log`: how far the game boots on the null GPU; fix what stops it (symptom index first).
+2. From that run's NVN call counts decide the texture upload path (pool writes vs CopyBufferToTexture) and wire
+   `nvn_bcsub` into `nvn_mtl.m` behind `NX_FORCE_ASTC_ONLY=1` / no-BC devices; let `front_ios_device_check` accept A16.
+3. Benchmark route (`bench.tsv`, `DM_KEYS`) into an Exhibition match; `DM_PERF_EXPORT` + `DM_NVN_TSV` → `docs/perf/`.
+4. FPS cap setting (find how the game paces: present interval, `GetMaxTickRate`), dynamic-resolution table, patches.
+5. iOS build in CI (unsigned IPA, encrypted), Simulator run of the real app, `scripts/fetch_ipa.sh`.
+6. `docs/optimizations.md`, `REPORT.md`, final audit of repo / releases / artifacts / logs.
