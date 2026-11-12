@@ -2404,7 +2404,8 @@ def ue3_body(d, label):
     """An Unreal Engine 3 package with its compressed chunks decoded: the summary, then chunks, each {tag, u32 block size, u32 compressed and raw size of the chunk, then per block a u32
     compressed and raw size} and the blocks (Batman: Arkham Knight: blocks of 0x20000 bytes, Oodle Mermaid, 8C 0A; a block stored whole has its two sizes equal). Zlib blocks are inflated here,
     the others go to the game's own decoder (oodle). A package without chunks is returned as it is"""
-    i = d.find(UE3_TAG, 4)
+    hs = struct.unpack_from('<I', d, 8)[0] if len(d) >= 12 else 0   # the summary's header size: where Rocket League 1.0's chunks start (a tag by chance in its uncompressed tables is not one)
+    i = hs if 12 <= hs and d[hs:hs + 4] == UE3_TAG else d.find(UE3_TAG, 4)
     if i < 0: return d
     out = [d[:i]]
     while i < len(d):
@@ -2428,11 +2429,19 @@ def ue3_shaders(d, label):
     for m in re.finditer(re.escape(CTL_MAGIC), d):
         c = m.start()
         if c + 0x708 > len(d): continue
-        n = struct.unpack_from('<I', d, c + 0x704)[0]; a = c - n
-        if a < 12 or d[a:a + 4] not in (GFX_MAGIC, CS_MAGIC): continue
-        nctl = next((lc for k in (4, 8) if a - k - 4 >= 0 for ln, lc in [struct.unpack_from('<II', d, a - k - 4)] if ln == n and 0x760 <= lc <= 0x1000), None)
-        if nctl is None or c + nctl > len(d): continue
-        ctl, code = d[c:c + nctl], d[a:c]
+        n = struct.unpack_from('<I', d, c + 0x704)[0]; a = c - n; e = c   # the code area is d[a:e]
+        if a >= 16 and d[a:a + 4] not in (GFX_MAGIC, CS_MAGIC) and d[a - 4:a] in (GFX_MAGIC, CS_MAGIC):
+            # Rocket League 1.0 (SDK 3.5.0, package version 868; globalshadercache-nnx.bin, 1,738 shaders): u32 code area length, the code area, u32 control length, the control
+            # section (0x840 bytes and its reflection, 0x870 to 0xdf0 in all), so the code area ends 4 bytes before the control section. Both lengths must fit, and the control
+            # length must cover the section's own (+0x20)
+            lc = struct.unpack_from('<I', d, c - 4)[0]
+            if struct.unpack_from('<I', d, a - 8)[0] != n or not 0x760 <= struct.unpack_from('<I', d, c + 0x20)[0] <= lc <= 0x10000 or c + lc > len(d): continue   # 12 of the 1,738 records hold 0x80 bytes more than the section's own length; the two largest sections are 0x4f88 and 0x5080 bytes
+            a -= 4; e = c - 4; nctl = lc
+        else:
+            if a < 12 or d[a:a + 4] not in (GFX_MAGIC, CS_MAGIC): continue
+            nctl = next((lc for k in (4, 8) if a - k - 4 >= 0 for ln, lc in [struct.unpack_from('<II', d, a - k - 4)] if ln == n and 0x760 <= lc <= 0x1000), None)
+            if nctl is None or c + nctl > len(d): continue
+        ctl, code = d[c:c + nctl], d[a:e]
         st = 'cs' if code[:4] == CS_MAGIC else sph_stage(code)
         why = check(label, st, ctl, code) if st else 'no stage in the code area header'
         if why: red(f'{label}: shader record at {c:#x} ({st}): {why}')

@@ -358,9 +358,14 @@ def build_sources(exefs, romfs, modules):
             with open(os.path.join(d, n), 'rb') as f: h = f.read(0x1000)
             if h[:4] != UE3_TAG or not 0 < struct.unpack_from('<H', h, 4)[0] < 0x8000: continue
             i = h.find(UE3_TAG, 4)
-            if 0 < i and i + 16 <= len(h):
+            if i < 0 and len(h) >= 12:
+                # Rocket League 1.0 (Panic Button's Unreal Engine 3, package version 868) stores the summary and its name, import and export tables uncompressed and starts the chunks at
+                # the header size the summary names (+8): 0x4665 to 0x4c6025 in its 1,571 packages, past the first 4 KB in every one
+                with open(os.path.join(d, n), 'rb') as f: f.seek(struct.unpack_from('<I', h, 8)[0]); t = f.read(0x1000)
+                if t[:4] == UE3_TAG: h, i = t, 0
+            if 0 <= i and i + 16 <= len(h) and h[i:i + 4] == UE3_TAG:
                 nb = (struct.unpack_from('<I', h, i + 12)[0] + max(struct.unpack_from('<I', h, i + 4)[0], 1) - 1) // max(struct.unpack_from('<I', h, i + 4)[0], 1)
-                oodle_ue3 += h[i + 16 + 8 * nb:i + 17 + 8 * nb] == b'\x8c'
+                oodle_ue3 += h[i + 16 + 8 * nb:i + 17 + 8 * nb] in (b'\x8c', b'\xcc')   # 0xCC: the same block header with its restart bit, 9 of Rocket League's first blocks
     import frostbite   # Frostbite's superbundles (EA SPORTS FC 27): every item of the cas files is Oodle Leviathan, decoded with the game's own decoder
     return shader_sources(imports, glsl_src, glslc_mods, spirv, len(uepak.unreal_paks(str(romfs), inline=False, mains=[exefs / 'main'])), trinity, len(uepak.unreal_paks(str(romfs), inline=True, mains=[exefs / 'main'])), gl_names, gl_src, gl_files, oodle_pkz, nro_imp,
                           oodle_gfpak=oodle_gfpak, oodle_ue3=oodle_ue3, frostbite=frostbite.is_frostbite(str(romfs)), romfs_glsl=romfs_glsl)

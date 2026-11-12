@@ -88,6 +88,7 @@ jobs:
           mkdir -p "$RL_OUT/survey" "$RL_OUT/profile"
           cp -R "$RL_GAME_DIR"/*_survey/. "$RL_OUT/survey/" 2>/dev/null || true
           cp -R "$RL_GAME_DIR"/*_build/profile/. "$RL_OUT/profile/" 2>/dev/null || true
+          mkdir -p "$RL_OUT/build-logs" && cp -R "$RL_GAME_DIR"/*_build/logs/. "$RL_OUT/build-logs/" 2>/dev/null || true
           ( cd "$RL_GAME_DIR" 2>/dev/null && { du -sh ./* ./*_build/* 2>/dev/null; df -h /; } ) > "$RL_OUT/logs/sizes.txt" 2>&1 || true
           scripts/rl/ci_pack_out.sh "rl-${{ inputs.platform }}-${{ github.run_number }}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
