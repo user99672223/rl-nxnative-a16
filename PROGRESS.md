@@ -19,9 +19,27 @@ Read this first in every session. Newest status at the top of each section.
 - Imported workflows: removed `pull_request`, `pull_request_target`, `issues` and `schedule`
   triggers (hard rule 2). Only `push` and `workflow_dispatch` remain.
 
+## Decisions that deviate from CLAUDE.md's plan (owner allowed adapting, 2026-11-12) and why
+
+1. **No picture and no GPU timing in CI.** Evidence: the runner's GPU probe (run 43149070535) reports "Apple Paravirtual
+   device", `metal3 false`, `metal4 false`; `dm/gfx/nvn/nvn_mtl.m` `mtl_init` aborts an NVN game without Metal 4 (its
+   whole replay layer is written against `MTL4*`; the shaders use argument buffers a paravirtual GPU lacks). All
+   GitHub-hosted Macs are VMs, and so is the iOS Simulator on them. Porting the 17k-line replay layer to classic
+   Metal blind (no local Mac) is not realistic. Instead: **the null GPU** (`dm/gfx/nvn/nvn_null.m`, `DM_NVN_NULL=1`):
+   every Metal 4 object is a stand-in, commits report at once. CI can then boot the game, drive it, count draws /
+   passes / pipelines / uploads (work metrics that carry to the A16), and exercise texture and memory paths.
+   What CI cannot show: rendered frames, GPU ms. The real renderer is exercised only on the owner's iPhone.
+   Shader correctness is still checked at build time (every shader translated and compiled by the Metal compiler).
+2. **BC→ASTC by content substitution in the host, not by rewriting game files.** Upstream issue seedds/nxnative#570
+   re-encodes 16-byte-block BC formats in place inside the RomFS; that cannot cover BC1/BC4 (8-byte blocks), and
+   Rocket League's packages are Oodle-compressed chunks (no encoder available, sizes would change). Plan: a pack-time
+   cache keyed by the hash of each texture level's BC bytes → ASTC blob, looked up at upload; CPU decode fallback for misses.
+3. **Encrypted inputs key** is an age identity (see Layout), not an `age -p` passphrase.
+
 ## Status
 
-- Phase: 0 (survey) nearly complete; Phase 1 (boot on Mac in CI) started.
+- Phase 0 done (facts below; engine config still to decode). Phase 1 in progress: CI builds from the encrypted NSP
+  (run 2: survey + rewrite OK, shader split failed → fixed reader for RL's UE3 layout; run 3 in progress).
 
 ## Survey facts (Phase 0)
 
