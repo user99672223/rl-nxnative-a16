@@ -31,7 +31,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: rl-build-${{ github.ref }}-${{ inputs.platform }}-${{ inputs.run_script }}
+  group: rl-build-${{ github.run_id }}   # one group a run: several runs with different switches go side by side (a shared group kept only the newest waiting run)
   cancel-in-progress: false
 
 env:
