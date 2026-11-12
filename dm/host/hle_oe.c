@@ -92,6 +92,11 @@ void dm_applet_enter(const char *name) { LOG("oe library applet: %s", name); foc
 void dm_applet_leave(void) { focus_sync(-1); }
 int dm_focus_now(void) { return atomic_load(&g_focus); }   // the front end's state, not an applet's: the display link follows the window
 uint64_t dm_focus_in_since(void) { return atomic_load(&g_focus_in_ns); }   // graphics layer display link watchdog: stalls are only computed while active, counted from activation (nvn_mtl.m mtl_present_wait)
+void dm_focus_set(int st);
+// DM_FOCUS_BLINK=<seconds> (diagnostic): at that time the game is out of focus for half a second and back in, as when the player opens and closes the HOME menu, to see what
+// a game does with the notifications
+static void *focus_blink(void *arg) { usleep((useconds_t)(atof(arg) * 1e6)); LOG("DM_FOCUS_BLINK: out of focus and back"); dm_focus_set(2); usleep(500000); dm_focus_set(1); return NULL; }
+__attribute__((constructor)) static void focus_blink_start(void) { const char *e = getenv("DM_FOCUS_BLINK"); pthread_t t; if (e && atof(e) > 0 && !pthread_create(&t, NULL, focus_blink, (void *)e)) pthread_detach(t); }
 void dm_focus_set(int st) {
     if (st < 1 || st > 3) die("dm_focus_set: invalid state %d", st);
     if (st == 1) atomic_store(&g_focus_in_ns, now_ns());
