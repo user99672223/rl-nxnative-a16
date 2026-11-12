@@ -113,6 +113,11 @@ Addresses are offsets into the 1.0 `main` (build `becfed97…`). Decompiled text
 - **Frame limiter**: `main+0xae6154` (UE3 `appUpdateTimeAndHandleMaxTickRate`): calls the engine's `GetMaxTickRate`
   (vtable `+0x290` of `*main+0x2e0ca40`), then sleeps (`main+0xaa20ec`) and spins on `nn::os::GetSystemTick` until
   `1/MaxTickRate`; `AllowPerFrameSleep/Yield` are read here.
+- **Physics tick**: fixed. The script defaults of `EngineShare_TA` (in `tagame.xxx`, read with the package parser) are
+  `PhysicsFramerate = 120.0`, `MaxPhysicsSubsteps = 5`; its native `GetBulletFixedDeltaTime` (`main+0xba0f54`) returns
+  `1 / [this+0x198]`. So physics steps at 120 Hz whatever the frame rate, up to 5 steps a frame: gameplay speed is right
+  at any frame rate of 24 fps or more (5 / 120 s = 41.7 ms a frame at most), and a 30 or 60 fps cap changes only how many
+  steps a frame takes (4 or 2).
 - **Stats text** "Docked %3.2f fps" / "Undocked %3.2f fps": `main+0x413e64`.
 - Texture formats in the cooked data (36,710 unique mips): DXT1 0.98 GB, DXT5 1.38 GB (5,094 mips of DXT5 normal maps
   `TC_NormalmapSwizzle`: x/y in alpha/green), A8R8G8B8 0.94 GB, G8, V8U8. No BC4/5/6/7. Mips are stored pre-swizzled
