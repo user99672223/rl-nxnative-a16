@@ -155,6 +155,17 @@ Read this first in every session. Newest status at the top of each section.
 - ASTC pack in CI: 1.61 GB, 33,696 levels, 13 m 55 s; the boot with it died on the null GPU's post-ring flake (before
   the backpressure fix) at 1,326 MiB. To rerun.
 
+### `scripts/fetch_ipa.sh` verified end to end (2026-11-12 08:32 local)
+
+- Run 43161430713 (platform=ios): artifact `rl-enc-ios-7`, 4.88 GB encrypted in parts → downloaded, joined, decrypted
+  with the laptop key, **checksum matches the build's**; `../RL/ipa/RocketLeague-run43161430713.ipa`, 4.6 GB, 52 files,
+  `Payload/DmIOS.app`. That build predates the ASTC pack fix, the settings fixes and both stubs: it has **no texture
+  pack inside**, so it is a test of the pipeline only. The final IPA is a later `platform=ios run_script=astc_pack.sh` run.
+- Input reaches the game: with 12 A presses `fs::MountSaveData` / `EnsureSaveData` are called once more (HLE counts of
+  runs 43172452198 / 43172468085). `nn::hid::GetNpadState` is called once a tick: 2,183 calls in 95 s, so the game
+  ticks at about 25 a second on the CI Mac. Each tick also resubmits a network request (`main+0xaca218`, the online
+  subsystem's reconnect loop; instant in the host). At boot `main+0xab7f90` sleeps 1 s while the request is "on hold".
+
 ## CI loops (all manual-dispatch or push to main; logs with game data are encrypted)
 
 | What | How | Time |
