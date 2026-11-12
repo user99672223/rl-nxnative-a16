@@ -130,6 +130,31 @@ Read this first in every session. Newest status at the top of each section.
   Without a pack, `NX_FORCE_ASTC_ONLY=1` ran 200 s on the CPU-decode fallback, peak 2,498 MiB.
 - iOS build 43161430713 finished (success); `scripts/fetch_ipa.sh` verification running.
 
+### Findings of the 07:00–07:30 runs (2026-11-12)
+
+- **Ghidra addresses are main offsets + 0x100000** for everything read off a decompile (`PTR_DAT_02e0ca40` is
+  `main+0x2d0ca40`); function names `FUN_00b9505c` = `main+0xa9505c`. The settings variables listed below were taken from
+  the file and are true main offsets. (The smoothing hold first read the engine pointer 1 MB off.)
+- Settings table rows end in a run-time flag (1 after the config is read), not 0: fixed; **101 settings found**, the dump
+  works (`DM_UE3_DUMP=1`). As shipped: ResX/ResY 1280x720, ScreenPercentage 100, AllowDynamicResolution 1,
+  MinimumScreenScale 100, UpscaleTargetFramerate 60/60, MaxAnisotropy 4, MaxShadowResolution 512, MotionBlur 1,
+  DepthOfField 1, Bloom 1, AmbientOcclusion 0, bAllowLightShafts 1, DynamicShadows 1, OneFrameThreadLag 1.
+- **Native 1440p takes** (`DM_UE3_RES=2560x1440`, run 43172097281): "WindowInitialize … first 2560x1440". The game then
+  faulted at `main+0xa9ca88`: a render target's storage came back null from the RHI's fixed "Targets" pool
+  (`main+0xab4698: mov w1, #0x11e10000`, 286 MB; the other pools: Textures 520 MB, Buffers 128 MB, Shaders 64 MB,
+  CommandBuffers 48 MB, Queries 2 MB). Fix: a rewriter stub sizes that pool by the held ResX (286 / 656 / 1,152 MB),
+  `dm/games/01005EE0036EC000/patches.py target_pool`. Rerun 43175097487.
+- **The per-draw submissions are Unreal's `RHIKickCommandBuffer`** (`main+0xa95968` → `main+0xab5ed4(dev, 1, 0)`), called
+  by the scene renderer between phases and after each post-process step (probe run 43171792130: callers
+  `main+0x7f0940`, `main+0x7f10e4`, …). Stub `kick_gate` returns at once while a flag is set; the flag is the system
+  setting `SpeedTreeLeaves` (`main+0x2e2adc0`, no code reads it), held by the host: `DM_UE3_KICK=merge|game`, setting
+  "Render pass merging", default game. A/B runs 43173025823 (game) / 43173040846 (merge).
+- Menu input: 30 A presses → no file opened, no log line (run 43169511083). The focus handler (`main+0xaa6a0`) only
+  notifies the online subsystem. HLE call counts with / without presses: runs 43172452198 / 43172468085
+  (`boot.sh` now ends a run with SIGTERM so the host writes `hlecount.tsv` and its exports).
+- ASTC pack in CI: 1.61 GB, 33,696 levels, 13 m 55 s; the boot with it died on the null GPU's post-ring flake (before
+  the backpressure fix) at 1,326 MiB. To rerun.
+
 ## CI loops (all manual-dispatch or push to main; logs with game data are encrypted)
 
 | What | How | Time |
