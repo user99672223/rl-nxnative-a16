@@ -140,3 +140,7 @@ void dm_mem_now(uint64_t *use, uint64_t *peak, uint64_t *budget, uint64_t *avail
     if (use) *use = 2600ull << 20; if (peak) *peak = 3100ull << 20; if (budget) *budget = 4000ull << 20; if (avail) *avail = 1350ull << 20; if (metal) *metal = 900ull << 20;
 }
 void mtl_perf_sizes(uint32_t *rw, uint32_t *rh, uint32_t *ow, uint32_t *oh) { *rw = 1600; *rh = 900; *ow = 2560; *oh = 1440; }
+
+// Host functions the production gamepad calls that this harness has no host for
+int dm_players_reported(void) { return 1; }   // hle_hid.c: the players the game sees
+int front_web_touch(void) { return 0; }       // web_apple.m: no offline page is shown over the picture
