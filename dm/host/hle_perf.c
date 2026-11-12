@@ -6,6 +6,8 @@
 #include "dm_perf.h"
 #include <math.h>
 #include <stdatomic.h>
+#include <pthread.h>
+#include <unistd.h>
 
 #define PERF_CHUNK 16384
 #define PERF_MAX_ROWS (PERF_CHUNK * 27)   // 442,368 frames: two hours at 60 fps
@@ -23,8 +25,15 @@ __attribute__((weak)) void mtl_perf_sizes(uint32_t *rw, uint32_t *rh, uint32_t *
 
 static dm_perf_row *row_at(uint64_t i) { return i < PERF_MAX_ROWS && g_chunk[i / PERF_CHUNK] ? &g_chunk[i / PERF_CHUNK][i % PERF_CHUNK] : NULL; }
 
+// DM_PERF_EXPORT=<base path>: the export without a panel (the benchmark in CI and on the Mac), rewritten every 10 s from a thread of its own, since a run that is stopped by
+// a signal or a time limit never reaches the destructor below
+static void *perf_export_loop(void *base) { for (;;) { sleep(10); if (atomic_load(&g_rows)) dm_perf_export(base, getenv("DM_PERF_INFO")); } return NULL; }
+static void perf_export_watch(void) {
+    const char *b = getenv("DM_PERF_EXPORT"); if (!b || !*b) return;
+    pthread_t t; if (!pthread_create(&t, NULL, perf_export_loop, (void *)b)) pthread_detach(t);
+}
 void dm_perf_frame(uint64_t frame, double frame_ms, double work_ms, unsigned passes, unsigned draws, double rt_load_mb, double rt_store_mb, unsigned pso_new) {
-    if (!g_t0) g_t0 = now_ns();
+    if (!g_t0) { g_t0 = now_ns(); perf_export_watch(); }
     uint64_t i = atomic_load(&g_rows); if (i >= PERF_MAX_ROWS) return;
     if (!g_have_first) { g_first_frame = frame; g_have_first = 1; }
     if (!g_chunk[i / PERF_CHUNK]) { dm_perf_row *c = calloc(PERF_CHUNK, sizeof *c); if (!c) return; pthread_mutex_lock(&g_perf_mu); g_chunk[i / PERF_CHUNK] = c; pthread_mutex_unlock(&g_perf_mu); }
