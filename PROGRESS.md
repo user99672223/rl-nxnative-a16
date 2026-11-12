@@ -86,7 +86,7 @@ Read this first in every session. Newest status at the top of each section.
   change with A presses (which screen is unknown: no picture on the null GPU, and the game's own log is not captured yet).
 - **~26 fps with 45 % of one core in use**: the game thread sleeps in the engine's limiter. Cause: UE3's frame-rate
   smoothing (`UEngine::GetMaxTickRate`, `main+0x40f074`) limits each frame to the running average of the last 300 frame
-  times, clamped to Min 22 / Max 62 (`[GEngine]+0x758` / `+0x754`, GEngine = `[main+0x2e0ca40]`); a wait that overshoots
+  times, clamped to Min 22 / Max 62 (`[GEngine]+0x758` / `+0x754`, GEngine through the GOT entry `main+0x2d0ca40` (Ghidra shows it as 0x2e0ca40: its addresses are main offsets + 0x100000)); a wait that overshoots
   lowers the average for good. Fix: `DM_UE3_SMOOTH` (default `steady`) writes Min = Max, so the limit is a flat 62 and the
   display paces the frames (`hle_ue3set.c k_smooth`, keyed by build). Setting "Frame-rate smoothing" in the panel.
 - **The engine settings table was never found** ("no system settings table in main"): the row named ScreenPercentage

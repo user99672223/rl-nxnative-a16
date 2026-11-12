@@ -131,10 +131,10 @@ void dm_ue3set_tick(void) { ue3_tick(1); }
 // Rocket League's config). Each frame is held to the average, so no frame can be shorter than it: any wait that overshoots lowers the average for good, down to the minimum.
 // Rocket League 1.0 on a virtual Mac settled at 25.9 fps with its game thread asleep in the limiter (main+0xae6154), 45 % of one core in use. The display's vsync already paces
 // the frames, so the smoothing is held flat: the minimum is written to the maximum, and the limit is the game's own 62 whatever the average says.
-// DM_UE3_SMOOTH=game leaves the engine's smoothing as shipped. Fixed offsets, so keyed by build: [main+0x2e0ca40] is GEngine, +0x754 the maximum, +0x758 the minimum
+// DM_UE3_SMOOTH=game leaves the engine's smoothing as shipped. Fixed offsets, so keyed by build: main+0x2d0ca40 is the GOT entry of GEngine, +0x754 the maximum, +0x758 the minimum
 // (main+0x40f074), +0x440 bit 0x200 bSmoothFrameRate.
 static const struct { const char *build; uint64_t engine; uint32_t max, min; } k_smooth[] = {
-    { "becfed979bb4204fbd0945cd450fb296", 0x2e0ca40, 0x754, 0x758 },
+    { "becfed979bb4204fbd0945cd450fb296", 0x2d0ca40, 0x754, 0x758 },
 };
 static _Atomic int g_smooth_on = -1;
 static void ue3_smooth_tick(void) {
@@ -148,7 +148,9 @@ static void ue3_smooth_tick(void) {
     if (row < 0) return;
     int on = atomic_load(&g_smooth_on);
     if (on < 0) { const char *e = getenv("DM_UE3_SMOOTH"); on = !(e && !strcmp(e, "game")); atomic_store(&g_smooth_on, on); }
-    uint64_t eng; memcpy(&eng, m->base + k_smooth[row].engine, 8); if (eng < 0x10000) return;   // GEngine is not made yet
+    uint64_t slot, eng; memcpy(&slot, m->base + k_smooth[row].engine, 8);   // main's GOT entry of GEngine
+    if (slot < (uint64_t)m->base || slot + 8 > (uint64_t)m->base + m->size) return;
+    memcpy(&eng, (void *)slot, 8); if (eng < 0x10000) return;   // GEngine is not made yet
     float mx, mn; memcpy(&mx, (uint8_t *)eng + k_smooth[row].max, 4); memcpy(&mn, (uint8_t *)eng + k_smooth[row].min, 4);
     { static int n; if (n < 3 && ++n) LOG("ue3 settings: frame-rate smoothing: GEngine %#llx, maximum %g, minimum %g", (unsigned long long)eng, mx, mn); }
     if (!(mx >= 30.0f && mx <= 480.0f) || !(mn >= 1.0f && mn <= 480.0f)) return;   // not the config's values (yet)
