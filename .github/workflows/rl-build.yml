@@ -23,6 +23,9 @@ on:
       run_env:
         description: extra host switches for the run script (K=V K=V)
         default: ''
+      game_args:
+        description: the game's own command line for the run script (an Unreal map URL)
+        default: ''
 
 permissions:
   contents: read
@@ -107,6 +110,7 @@ jobs:
           RUN_SCRIPT: ${{ inputs.run_script }}
           RL_RUN_SECONDS: ${{ inputs.run_seconds }}
           RL_RUN_ENV: ${{ inputs.run_env }}
+          RL_GAME_ARGS: ${{ inputs.game_args }}
           DM_UE3_PKG_KEY: ${{ secrets.RL_UE3_PKG_KEY }}
         run: |
           case "$RUN_SCRIPT" in *[!a-zA-Z0-9_.,-]*) echo "bad script name"; exit 1;; esac
