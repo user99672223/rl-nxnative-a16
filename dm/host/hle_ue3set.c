@@ -148,13 +148,17 @@ static void ue3_smooth_tick(void) {
     { static int once; if (!once++) LOG("ue3 settings: frame-rate smoothing: main build %s, %s", m ? m->build_id : "(no main)", row < 0 ? "no row for it" : "row found"); }
     if (row < 0) return;
     int on = atomic_load(&g_smooth_on);
-    if (on < 0) { const char *e = getenv("DM_UE3_SMOOTH"); on = !(e && !strcmp(e, "game")); atomic_store(&g_smooth_on, on); }
+    if (on < 0) { const char *e = getenv("DM_UE3_SMOOTH"); on = e && !strcmp(e, "game") ? 0 : e && !strcmp(e, "off") ? 2 : 1; atomic_store(&g_smooth_on, on); }
     uint64_t slot, eng; memcpy(&slot, m->base + k_smooth[row].engine, 8);   // main's GOT entry of GEngine
     if (slot < (uint64_t)m->base || slot + 8 > (uint64_t)m->base + m->size) return;
     memcpy(&eng, (void *)slot, 8); if (eng < 0x10000) return;   // GEngine is not made yet
     float mx, mn; memcpy(&mx, (uint8_t *)eng + k_smooth[row].max, 4); memcpy(&mn, (uint8_t *)eng + k_smooth[row].min, 4);
     { static int n; if (n < 3 && ++n) LOG("ue3 settings: frame-rate smoothing: GEngine %#llx, maximum %g, minimum %g", (unsigned long long)eng, mx, mn); }
     if (!(mx >= 30.0f && mx <= 480.0f) || !(mn >= 1.0f && mn <= 480.0f)) return;   // not the config's values (yet)
+    // off: bSmoothFrameRate (bit 0x200 of the flags at +0x440) is cleared, so GetMaxTickRate returns 0 and the engine's limiter waits for nothing: only the display paces the frames
+    { static int cleared; uint32_t fl; memcpy(&fl, (uint8_t *)eng + 0x440, 4);
+      if (on == 2 && (fl & 0x200)) { fl &= ~0x200u; memcpy((uint8_t *)eng + 0x440, &fl, 4); if (!cleared++) LOG("ue3 settings: the engine's frame-rate limit is off (bSmoothFrameRate cleared): the display paces the frames"); }
+      else if (on != 2 && cleared && !(fl & 0x200)) { fl |= 0x200; memcpy((uint8_t *)eng + 0x440, &fl, 4); cleared = 0; } }
     if (on && mn != mx) {
         if (!have_orig) { orig = mn; have_orig = 1; }
         memcpy((uint8_t *)eng + k_smooth[row].min, &mx, 4);
@@ -223,7 +227,7 @@ static void nx_apply(const char *env, const char *v, int live) {
         // The renderer's mid-frame kicks (RHIKickCommandBuffer), gated by the rewriter's stub on a setting no code reads (dm/games/01005EE0036EC000/patches.py): merge = no
         // kicks, so the frame's command lists are few and its render passes stay open; game = as shipped. Always held, since the config's own value of the setting is arbitrary
         if (ue3_kick_build()) dm_ue3_set("SpeedTreeLeaves", v && !strcmp(v, "merge") ? "1" : "0");
-    } else if (!strcmp(env, "DM_UE3_SMOOTH")) { atomic_store(&g_smooth_on, !(v && !strcmp(v, "game")));
+    } else if (!strcmp(env, "DM_UE3_SMOOTH")) { atomic_store(&g_smooth_on, v && !strcmp(v, "game") ? 0 : v && !strcmp(v, "off") ? 2 : 1);
     } else if (!strncmp(env, "DM_UE3S_", 8)) dm_ue3_set(env + 8, v && strcmp(v, "game") ? v : "");
     else return;
     if (live) dm_perf_mark(note);
