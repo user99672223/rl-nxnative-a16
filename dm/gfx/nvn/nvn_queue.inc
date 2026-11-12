@@ -14,6 +14,7 @@ typedef struct nq_node {
     unsigned kind, mode, closed, waiting; volatile uint32_t *event; uint32_t value;
     uint64_t wait_fence, event_predecessor, wait_since; unsigned wait_kind, wait_said; const sync_t *sync_source; nq_receipt *receipt;
     nq_signal *signals; unsigned signal_count;   // NQ_COMMANDS: every event signal it records, in order (nq_event_issued at its commit)
+    struct nq_fence { const sync_t *source; nq_receipt *receipt; } *fences; unsigned fence_count;   // NQ_COMMANDS: the syncs fenced among its commands (nq_record_one), published at its commit
     tex_t texture; double period; int crop[4];
 } nq_node;
 typedef struct nq_owned { struct nq_owned *next; unsigned kind; uint64_t data[]; } nq_owned;
@@ -180,7 +181,7 @@ static void *nq_worker(void *unused) {
             }
             nq_cost_end(cost); gfx_leave(); objc_autoreleasePoolPop(pool); pthread_mutex_unlock(&g_sub_mu);
         }
-        pthread_mutex_lock(&nq_mu); if(n->kind==NQ_PRESENT) { q->present=present; q->copy=copy; j->receipt->present=present; j->receipt->copy=copy; } if(fence) { q->physical=fence; for(unsigned i=0;i<n->signal_count;i++) nq_event_issued(n->signals[i].event,fence,n->signals[i].mode,n->signals[i].value); } if(n->receipt) nq_put(n->receipt); free(n->signals); free(n->bytes); free(n); pthread_cond_broadcast(&nq_cv); pthread_mutex_unlock(&nq_mu);
+        pthread_mutex_lock(&nq_mu); if(n->kind==NQ_PRESENT) { q->present=present; q->copy=copy; j->receipt->present=present; j->receipt->copy=copy; } if(fence) { q->physical=fence; for(unsigned i=0;i<n->signal_count;i++) nq_event_issued(n->signals[i].event,fence,n->signals[i].mode,n->signals[i].value); } for(unsigned i=0;i<n->fence_count;i++) { nq_publish(n->fences[i].receipt,q->physical); nq_put(n->fences[i].receipt); } free(n->fences); if(n->receipt) nq_put(n->receipt); free(n->signals); free(n->bytes); free(n); pthread_cond_broadcast(&nq_cv); pthread_mutex_unlock(&nq_mu);
     }
     return NULL;
 }
@@ -196,8 +197,19 @@ static void nq_end(nq_job *j) { if(j->last && j->last->kind==NQ_COMMANDS && !j->
 // it is among complete (mtl_sub_event), and a wait on it is ordered by that value or, while it is in flight, by the fence of those commands (nq_event_write), so the node keeps
 // every signal it records. Each node is a Metal command buffer of its own, so a cut ends the open render pass: BioShock Infinite signals an event per occlusion query, and a cut
 // at each took its title screen from 88 to 189 passes a frame and from 734 MB to 2.58 GB of attachment loads (issue #2112)
+// A fence among commands does not cut either: the sync is published with the fence of the commands it is among, when they are committed. That is the first moment the host
+// can name later than the fence's own, so the sync never passes early; a wait on it still orders after those commands. Rocket League 1.0 (Scaleform's render sync) fences
+// after every UI draw, 17 a frame: each was a node of its own, and the 11 draws of its menu's UI 11 passes loading and storing the whole target (241 MB of attachment
+// traffic a frame at 720p, 966 MB at 1440p). DM_NVN_FENCE_CUT=1 cuts at each fence as before
+static int nq_fence_cuts(void) { static int v=-1; if(v<0) { const char *e=getenv("DM_NVN_FENCE_CUT"); v=e && !strcmp(e,"1"); if(v) LOG("DM_NVN_FENCE_CUT=1: a fence among commands ends their command buffer"); } return v; }
 static void nq_record_one(nq_job *j,const uint8_t *p,op_hdr h) {
     const uint8_t *a=p+8;
+    if(h.op==OP_FENCE_SYNC && j->last && j->last->kind==NQ_COMMANDS && !j->last->closed && !nq_fence_cuts()) {
+        nq_node *n=j->last;
+        if(!(n->fence_count&(n->fence_count-1))) { n->fences=realloc(n->fences,(n->fence_count?2*n->fence_count:1)*sizeof *n->fences); if(!n->fences) die("queue fences allocation failed"); } // NOLINT(bugprone-suspicious-realloc-usage): allocation failure aborts
+        struct nq_fence f; memcpy(&f.source,a,8); f.receipt=nq_new(); n->fences[n->fence_count++]=f;
+        return;
+    }
     if(h.op==OP_END || h.op==OP_JUMP || h.op==OP_CALL) die("NVN command list: a %s record inside a recording's piece at %p",h.op==OP_END?"END":h.op==OP_JUMP?"JUMP":"CALL",(const void *)p);
     if(h.op==OP_WAIT_EVENT || h.op==OP_WAIT_SYNC || h.op==OP_FENCE_SYNC) {
         nq_end(j); nq_node *n=nq_append(j,h.op==OP_WAIT_EVENT?NQ_EVENT:h.op==OP_WAIT_SYNC?NQ_SYNC:NQ_FENCE);
@@ -247,6 +259,7 @@ void nvn_queue_submit(queue_t *q,int count,const uint64_t *handles) {
     int waits=0; for(nq_node *node=j->first;node;node=node->next) waits|=node->kind==NQ_EVENT || node->kind==NQ_SYNC;
     nvn_cap_queue(q->serial,waits);
     pthread_mutex_lock(&nq_mu);
+    for(nq_node *node=j->first;node;node=node->next) for(unsigned i=0;i<node->fence_count;i++) { nq_set_sync((sync_t *)node->fences[i].source,node->fences[i].receipt); node->fences[i].source=NULL; }
     for(nq_node *node=j->first;node;node=node->next) if(node->sync_source) {
         if(node->kind==NQ_FENCE) nq_set_sync((sync_t *)node->sync_source,node->receipt); else nq_snapshot_sync(node,node->sync_source);
         node->sync_source=NULL;
