@@ -1,0 +1,46 @@
+# Compile check of the host for the Mac and the iPhone SDK. No game files, keys or secrets: only this repository's sources are built, so the compiler output is public.
+name: RL compile check
+on:
+  push:
+    branches: [main]
+    paths: ['dm/host/**', 'dm/gfx/**', 'dm/ios/**', 'dm/games/01005EE0036EC000/**', '.github/workflows/rl-compile.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rl-compile-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+
+jobs:
+  compile:
+    if: github.repository_owner == github.actor
+    runs-on: xcode-27
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Profile
+        run: |
+          if [ -f dm/games/01005EE0036EC000/game.tsv ]; then echo "GAME=01005EE0036EC000" >> "$GITHUB_ENV"; else echo "GAME=0100ACD0163D0000" >> "$GITHUB_ENV"; fi
+      - name: Mac host
+        run: |
+          xcodebuild -downloadComponent MetalToolchain >/dev/null 2>&1 || true
+          make -C dm/host GAME="$GAME" -j3 dmhost 2>&1 | tee host.log | grep -E "error|warning: .*(nvn_null|memstat|hle_net|hle_offline|nvn_bcsub|rl_)|^make|Error" | head -150
+          test "${PIPESTATUS[0]}" = 0 && test -x dm/host/dmhost
+      - name: Null GPU smoke (a host with no game: must stop at the missing modules, not at the Metal device)
+        run: |
+          DM_NVN_NULL=1 perl -e 'alarm 20; exec @ARGV' dm/host/dmhost /nonexistent 2>&1 | head -20 || true
+      - name: iOS host sources for the iPhone SDK
+        run: python3 dm/ios/tools/compile_check.py 2>&1 | tail -40
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: compile-logs
+          path: host.log
+          retention-days: 3
