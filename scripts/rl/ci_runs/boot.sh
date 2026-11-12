@@ -8,6 +8,8 @@ host="$B/tools/dmhost"; patched=$(ls -d "$B"/patched_* | head -1); romfs=$(ls "$
 G="$GITHUB_WORKSPACE/dm/games/$GAME"; [ -f "$G/game.tsv" ] || { export DM_GAMES_DIR="$B/profile"; G="$B/profile/$GAME"; }
 echo "host=$host patched=$patched romfs=$romfs profile=$G"; ls -la "$B" "$B/tools" "$B/shader" 2>&1 | head -60
 [ -x "$host" ] || { echo "no host binary"; exit 3; }
+[ -s "$B/bc_astc.pack" ] && export DM_BCSUB_PACK="$B/bc_astc.pack"   # the ASTC stand-ins of the BC textures (astc_pack.sh): used with NX_FORCE_ASTC_ONLY=1 in RL_RUN_ENV
+unset DM_UE3_PKG_KEY
 cd "$B/run" || exit 3
 # shellcheck disable=SC2086
 env DM_ROOT="$B" DM_ROMFS="$romfs" DM_SAVE="$B/run/save" DM_TEMP="$B/run/temp" DM_MSL_DIR="$B/shader/cache" DM_FONT_DIR="$B/font" \

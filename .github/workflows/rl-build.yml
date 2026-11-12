@@ -12,7 +12,7 @@ on:
         description: extra arguments for build_ipa_from_nsp.py
         default: ''
       run_script:
-        description: script under scripts/rl/ci_runs/ to run after the build (optional)
+        description: scripts under scripts/rl/ci_runs/ to run after the build, comma separated (optional)
         default: ''
       use_cache:
         description: restore the encrypted build cache (yes | no)
@@ -101,9 +101,12 @@ jobs:
           RUN_SCRIPT: ${{ inputs.run_script }}
           RL_RUN_SECONDS: ${{ inputs.run_seconds }}
           RL_RUN_ENV: ${{ inputs.run_env }}
+          DM_UE3_PKG_KEY: ${{ secrets.RL_UE3_PKG_KEY }}
         run: |
-          case "$RUN_SCRIPT" in *[!a-zA-Z0-9_.-]*) echo "bad script name"; exit 1;; esac
-          scripts/rl/ci_step.sh run bash "scripts/rl/ci_runs/$RUN_SCRIPT"
+          case "$RUN_SCRIPT" in *[!a-zA-Z0-9_.,-]*) echo "bad script name"; exit 1;; esac
+          rc=0
+          for s in ${RUN_SCRIPT//,/ }; do scripts/rl/ci_step.sh "run-${s%.sh}" bash "scripts/rl/ci_runs/$s" || rc=$?; done
+          exit $rc
       - name: Archive the build for the cache (encrypted)
         if: always()
         run: scripts/rl/ci_cache.sh save
