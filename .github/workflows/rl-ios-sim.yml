@@ -56,6 +56,15 @@ jobs:
           xcodebuild test -project DuoHarness.xcodeproj -scheme DuoHarness -destination "platform=iOS Simulator,id=$UDID" \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO -resultBundlePath "$RUNNER_TEMP/duo.xcresult" 2>&1 | tee "$GITHUB_WORKSPACE/logs/xcodebuild.log" \
             | grep -E "error:|warning: unused|Test Case .*(passed|failed)|\*\* TEST|Executed [0-9]+ tests|: error|XCTAssert|failed -" | head -300
+      - name: A failing test again, alone (does it depend on the tests before it?)
+        if: failure()
+        run: |
+          cd dm/ios/tests/duo
+          for t in $(grep -oE "Test Case '-\[DuoHarnessTests [A-Za-z0-9_]+\]' failed" "$GITHUB_WORKSPACE/logs/xcodebuild.log" | sed -E "s/.*DuoHarnessTests ([A-Za-z0-9_]+).*/\1/" | sort -u | head -4); do
+            echo "== $t alone"
+            xcodebuild test -project DuoHarness.xcodeproj -scheme DuoHarness -destination "platform=iOS Simulator,id=$UDID" -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO \
+              -only-testing:"DuoHarnessTests/DuoHarnessTests/$t" 2>&1 | grep -E "Test Case .*(passed|failed)|error:" | head -6
+          done
       - name: Whole-screen pictures of the simulator
         if: always()
         run: |

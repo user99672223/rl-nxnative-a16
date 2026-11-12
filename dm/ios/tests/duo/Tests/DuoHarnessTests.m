@@ -1386,7 +1386,8 @@ static void DuoFeedFrames(uint64_t from, int n, double ms) {
 
 - (void)testPerformanceRecordSummarisesFrames {
     uint64_t before = dm_perf_rows();
-    DuoFeedFrames(100000 + before, 600, 16.6);
+    uint64_t f0 = 1000000 + before * 4;
+    DuoFeedFrames(f0, 600, 16.6);
     XCTAssertEqual(dm_perf_rows(), before + 600);
     dm_perf_sum s; dm_perf_window(before, before + 600, &s);
     XCTAssertEqual(s.frames, 600u);
@@ -1396,14 +1397,14 @@ static void DuoFeedFrames(uint64_t from, int n, double ms) {
     XCTAssertEqualWithAccuracy(s.gpu_ms, 16.6 * 0.6, 0.05, @"GPU times arrive 8 frames late and land on their frames");
     XCTAssertEqualWithAccuracy(s.draws, 950, 0.5); XCTAssertEqualWithAccuracy(s.passes, 14, 0.5);
     dm_perf_row rows[16]; int n = dm_perf_recent(rows, 16);
-    XCTAssertEqual(n, 16); XCTAssertEqual(rows[15].frame, (uint32_t)(100000 + before + 599));
+    XCTAssertEqual(n, 16); XCTAssertEqual(rows[15].frame, (uint32_t)(f0 + 599));
     XCTAssertEqual(rows[15].mem_mb, 2600, @"each row carries what iOS counts against the app");
 }
 
 - (void)testDiagnosticPanelIsAnOverlayWithoutAMonitor {
     UIViewController *root = [self harnessRootViewController];
     XCTAssertNotNil(root); [root.view layoutIfNeeded];
-    DuoFeedFrames(200000 + dm_perf_rows(), 400, 16.7);
+    DuoFeedFrames(1000000 + dm_perf_rows() * 4, 400, 16.7);
     XCTAssertFalse(dm_tv_connected());
     dm_diag_show(true);
     XCTAssertTrue(dm_diag_shown());
@@ -1422,9 +1423,9 @@ static void DuoFeedFrames(uint64_t from, int n, double ms) {
 
 - (void)testDiagnosticPanelExportsThePerformanceLog {
     UIViewController *root = [self harnessRootViewController]; [root.view layoutIfNeeded];
-    DuoFeedFrames(300000 + dm_perf_rows(), 300, 16.7);
+    DuoFeedFrames(1000000 + dm_perf_rows() * 4, 300, 16.7);
     dm_perf_mark("DM_UE3_SCALE=0.75");
-    DuoFeedFrames(300300 + dm_perf_rows(), 300, 13.2);
+    DuoFeedFrames(1000000 + dm_perf_rows() * 4, 300, 13.2);
     char path[1024] = "";
     XCTAssertEqual(dm_diag_export_now(path, (int)sizeof path), 0);
     NSString *json = @(path);
@@ -1458,7 +1459,7 @@ static void DuoFeedFrames(uint64_t from, int n, double ms) {
     UIViewController *root = [self harnessRootViewController]; [root.view layoutIfNeeded];
     UIView *game = [root valueForKey:@"game"]; CAMetalLayer *metal = (CAMetalLayer *)game.layer;
     UIWindowScene *scene = root.view.window.windowScene; XCTAssertNotNil(scene);
-    DuoFeedFrames(400000 + dm_perf_rows(), 400, 16.7);
+    DuoFeedFrames(1000000 + dm_perf_rows() * 4, 400, 16.7);
     int mode_was = dm_opmode();
     setenv("DM_TV_WIDTH", "2560", 1); setenv("DM_PANEL", "1", 1);
     // The monitor's scene: iOS hands the app a scene of the external-display role; its delegate is what the Info.plist and the scene accessory name. Here it is given the test
