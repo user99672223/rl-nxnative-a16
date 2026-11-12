@@ -29,6 +29,7 @@ on:
 
 permissions:
   contents: read
+  actions: write   # to delete the older cached builds of the same platform (the cache holds 10 GB; four Mac builds had pushed the iPhone one out)
 
 concurrency:
   group: rl-build-${{ github.run_id }}   # one group a run: several runs with different switches go side by side (a shared group kept only the newest waiting run)
@@ -135,6 +136,16 @@ jobs:
         with:
           path: ${{ runner.temp }}/rl-cache
           key: rl-build-${{ inputs.platform }}-${{ github.run_number }}
+      - name: Keep one cached build a platform
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: rl-build-${{ inputs.platform }}-${{ github.run_number }}
+          PREFIX: rl-build-${{ inputs.platform }}-
+        run: |
+          gh cache list -R "$GITHUB_REPOSITORY" --key "$PREFIX" -L 100 --json id,key -q '.[]|select(.key!=env.KEEP)|.id' | while read -r c; do gh cache delete "$c" -R "$GITHUB_REPOSITORY" || true; done
+          gh cache list -R "$GITHUB_REPOSITORY" -L 20 || true
       - name: Collect and encrypt outputs
         if: always()
         run: |
@@ -150,6 +161,10 @@ jobs:
             rm -rf "$RL_GAME_DIR"/*_build/shader "$RL_GAME_DIR"/*_build/extract "$RL_GAME_DIR"/game.nsp "$RL_CACHE_DIR"   # the cache is saved already; room for the encrypted copy
             ( cd "$(dirname "$ipa")" && shasum -a 256 "$(basename "$ipa")" | cut -d' ' -f1 > "$RL_UPLOAD/ipa.sha256.txt.plain" )
             age -r "$(cat scripts/rl/recipient.txt)" -o "$RL_UPLOAD/ipa.sha256.age" "$RL_UPLOAD/ipa.sha256.txt.plain" && rm -f "$RL_UPLOAD/ipa.sha256.txt.plain"
+            # The update: everything in the IPA but its large game data files, about 40 MB, in an artifact of its own (scripts/fetch_ipa.sh --update builds the new IPA from it and the one on the laptop)
+            mkdir -p "$RUNNER_TEMP/rl-upload-update"
+            python3 scripts/rl/ipa_delta.py make "$ipa" "$RUNNER_TEMP/ipa-update.zip" && age -r "$(cat scripts/rl/recipient.txt)" -o "$RUNNER_TEMP/rl-upload-update/RocketLeague.update.zip.age" "$RUNNER_TEMP/ipa-update.zip" || echo "::warning::no update package was made"
+            rm -f "$RUNNER_TEMP/ipa-update.zip"
             age -r "$(cat scripts/rl/recipient.txt)" < "$ipa" | split -b 1900m - "$RL_UPLOAD/RocketLeague.ipa.age.part"
             rm -f "$ipa"; echo "encrypted IPA: $(ls "$RL_UPLOAD" | grep -c ipa.age.part) part(s), $(du -sh "$RL_UPLOAD" | cut -f1)"
           fi
@@ -158,6 +173,13 @@ jobs:
         with:
           name: rl-enc-${{ inputs.platform }}-${{ github.run_number }}
           path: ${{ runner.temp }}/rl-upload
+          retention-days: 14
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && inputs.platform == 'ios'
+        with:
+          name: rl-enc-iosupdate-${{ github.run_number }}
+          path: ${{ runner.temp }}/rl-upload-update
+          if-no-files-found: ignore
           retention-days: 14
       - name: Delete decrypted files
         if: always()

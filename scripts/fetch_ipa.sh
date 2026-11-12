@@ -2,6 +2,10 @@
 # Download the newest encrypted IPA built by the "RL build" workflow and decrypt it on this laptop.
 #
 #   scripts/fetch_ipa.sh [run id] [output folder]
+#   scripts/fetch_ipa.sh --update [run id] [output folder]
+#
+# --update downloads only the build's update package (about 40 MB: the app without its large game data files) and builds the new IPA from it and the newest IPA
+# already in the output folder (RL_OLD_IPA names another). It refuses when the build changed a large file; then fetch the whole IPA without --update.
 #
 # The IPA is unsigned: sign and install it with your sideloading tool (turn on Increased Memory Limit if the tool offers it).
 # Needs: gh (logged in), age, and the private key this laptop made for the port (~/.config/rl-port/age.key; RL_AGE_KEY names another).
@@ -13,6 +17,7 @@ for c in "$GH" "$HOME/.local/bin/gh" /home/familybadgujarwilly/.local/bin/gh /us
 [ -d "${GH_CONFIG_DIR:-$HOME/.config/gh}" ] || export GH_CONFIG_DIR=/home/familybadgujarwilly/.config/gh
 KEY="${RL_AGE_KEY:-$HOME/.config/rl-port/age.key}"; [ -f "$KEY" ] || KEY=/home/familybadgujarwilly/.config/rl-port/age.key
 [ -f "$KEY" ] || { echo "no private key at $KEY (it was made on the laptop that set the port up)" >&2; exit 1; }
+update=0; [ "${1:-}" = "--update" ] && { update=1; shift; }
 REPO="${RL_REPO:-user99672223/rl-nxnative-a16}"
 here="$(cd "$(dirname "$0")" && pwd)"
 out="${2:-$(cd "$here/../.." && pwd)/RL/ipa}"
@@ -25,6 +30,20 @@ if [ -z "$run" ]; then
 fi
 [ -n "$run" ] || { echo "no finished run with an iPhone build artifact (rl-enc-ios-*) was found in $REPO" >&2; exit 1; }
 tmp="$out/.fetch-$run"; rm -rf "$tmp"; mkdir -p "$tmp"
+if [ "$update" = 1 ]; then
+  old="${RL_OLD_IPA:-$(ls -t "$out"/*.ipa 2>/dev/null | head -1)}"
+  [ -f "${old:-}" ] || { echo "no IPA in $out to update from: fetch the whole one first (scripts/fetch_ipa.sh $run)" >&2; exit 1; }
+  ipa="$out/RocketLeague-run$run.ipa"; [ "$old" != "$ipa" ] || { echo "$ipa is already this run's"; exit 0; }
+  mkdir -p "$tmp"; export TMPDIR="$tmp"
+  echo "downloading the update package of run $run ..."
+  "$GH" run download "$run" -R "$REPO" -D "$tmp" -p 'rl-enc-iosupdate-*'
+  pkg=$(find "$tmp" -name 'RocketLeague.update.zip.age' | head -1)
+  [ -n "$pkg" ] || { echo "run $run has no update package (a build from before 2026-11-12 evening, or one that failed)" >&2; exit 1; }
+  age -d -i "$KEY" -o "$tmp/update.zip" "$pkg"
+  echo "building $ipa from $(basename "$old") ..."
+  python3 "$here/rl/ipa_delta.py" apply "$old" "$tmp/update.zip" "$ipa" || { rm -f "$ipa"; rm -rf "$tmp"; exit 1; }
+  rm -rf "$tmp"; ls -lh "$ipa"; echo "unsigned IPA ready: $ipa"; exit 0
+fi
 # gh keeps the artifact's zip in the temporary folder while it downloads: several GB, and /tmp is often memory (tmpfs). It goes beside the output instead
 export TMPDIR="$tmp"
 echo "downloading the encrypted artifact of run $run ..."
