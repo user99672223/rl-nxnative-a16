@@ -16,6 +16,7 @@
 
 enum { UE3_INT = 2, UE3_FLOAT = 4, UE3_BOOL = 5 };
 #define UE3_MAX 256
+#define UE3_IMAGE_MAX ((uint64_t)1 << 30)   // no main with its bss is larger
 typedef struct { char name[48]; int type; uint8_t *var; int held; uint32_t want; uint32_t orig; int have_orig; } ue3_row;
 static ue3_row g_row[UE3_MAX]; static int g_nrow; static pthread_once_t g_once = PTHREAD_ONCE_INIT; static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
 static _Atomic int g_any_held;
@@ -31,7 +32,7 @@ static int row_at(const module_t *m, const uint8_t *e, ue3_row *r) {
     uint32_t type; uint64_t name, var, help, zero; memcpy(&type, e, 4); memcpy(&name, e + 8, 8); memcpy(&var, e + 0x10, 8); memcpy(&help, e + 0x20, 8); memcpy(&zero, e + 0x28, 8);
     char h[8];
     if ((type != UE3_INT && type != UE3_FLOAT && type != UE3_BOOL) || zero) return 0;
-    if (var < (uint64_t)m->base || var + 4 > (uint64_t)m->base + m->size || (var & 3)) return 0;
+    if (var < (uint64_t)m->base || var + 4 > (uint64_t)m->base + UE3_IMAGE_MAX || (var & 3)) return 0;   // the variables are in main's bss, past the file's own bytes
     if (u32_text(m, name, r->name, sizeof r->name) < 3) return 0;
     if (help && !(help >= (uint64_t)m->base && help < (uint64_t)m->base + m->size)) return 0;
     (void)h; r->type = (int)type; r->var = (uint8_t *)var; r->held = 0; r->have_orig = 0;
@@ -45,7 +46,7 @@ static void ue3_find(void) {
     static const uint32_t key[] = {'S','c','r','e','e','n','P','e','r','c','e','n','t','a','g','e',0};
     uint8_t *b = m->base; uint64_t n = m->size;
     for (uint64_t o = 4; o + sizeof key <= n; o += 4) {
-        if (memcmp(b + o, key, sizeof key) || memcmp(b + o - 4, "\0\0\0\0", 4)) continue;   // the whole text, not the tail of UpscaleScreenPercentage
+        if (memcmp(b + o, key, sizeof key)) continue;   // the text up to its end: in Rocket League 1.0 it is the tail of UpscaleScreenPercentage's (the linker merged them), and the row points into it
         uint64_t want = (uint64_t)(b + o);
         for (uint64_t s = 8; s + 48 <= n; s += 8) {   // the row whose name pointer is that text
             uint64_t v; memcpy(&v, b + s, 8); if (v != want) continue;
@@ -121,6 +122,36 @@ static void ue3_tick(int present);
 // (main+0xab43cc), so settings held from the start must be in place before the first present
 void dm_ue3set_early(void) { ue3_tick(0); }
 void dm_ue3set_tick(void) { ue3_tick(1); }
+// ---------- The engine's frame-rate smoothing (UEngine::GetMaxTickRate) ----------
+// With bSmoothFrameRate the engine limits each frame to the running average of the last 300 frame times, kept between MinSmoothedFrameRate and MaxSmoothedFrameRate (22 and 62 in
+// Rocket League's config). Each frame is held to the average, so no frame can be shorter than it: any wait that overshoots lowers the average for good, down to the minimum.
+// Rocket League 1.0 on a virtual Mac settled at 25.9 fps with its game thread asleep in the limiter (main+0xae6154), 45 % of one core in use. The display's vsync already paces
+// the frames, so the smoothing is held flat: the minimum is written to the maximum, and the limit is the game's own 62 whatever the average says.
+// DM_UE3_SMOOTH=game leaves the engine's smoothing as shipped. Fixed offsets, so keyed by build: [main+0x2e0ca40] is GEngine, +0x754 the maximum, +0x758 the minimum
+// (main+0x40f074), +0x440 bit 0x200 bSmoothFrameRate.
+static const struct { const char *build; uint64_t engine; uint32_t max, min; } k_smooth[] = {
+    { "becfed979bb4204fbd0945cd450fb296", 0x2e0ca40, 0x754, 0x758 },
+};
+static _Atomic int g_smooth_on = -1;
+static void ue3_smooth_tick(void) {
+    static const module_t *m; static int row = -2; static float orig; static int have_orig, said;
+    if (row == -2) {
+        row = -1;
+        for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main")) m = &g_mod[i];
+        for (int i = 0; m && i < (int)(sizeof k_smooth / sizeof k_smooth[0]); i++) if (!strcmp(m->build_id, k_smooth[i].build)) row = i;
+    }
+    if (row < 0) return;
+    int on = atomic_load(&g_smooth_on);
+    if (on < 0) { const char *e = getenv("DM_UE3_SMOOTH"); on = !(e && !strcmp(e, "game")); atomic_store(&g_smooth_on, on); }
+    uint64_t eng; memcpy(&eng, m->base + k_smooth[row].engine, 8); if (eng < 0x10000) return;   // GEngine is not made yet
+    float mx, mn; memcpy(&mx, (uint8_t *)eng + k_smooth[row].max, 4); memcpy(&mn, (uint8_t *)eng + k_smooth[row].min, 4);
+    if (!(mx >= 30.0f && mx <= 480.0f) || !(mn >= 1.0f && mn <= 480.0f)) return;   // not the config's values (yet)
+    if (on && mn != mx) {
+        if (!have_orig) { orig = mn; have_orig = 1; }
+        memcpy((uint8_t *)eng + k_smooth[row].min, &mx, 4);
+        if (!said++) LOG("ue3 settings: frame-rate smoothing held flat at the game's maximum, %g fps (its minimum was %g; DM_UE3_SMOOTH=game leaves it)", mx, mn);
+    } else if (!on && have_orig && mn == mx) { memcpy((uint8_t *)eng + k_smooth[row].min, &orig, 4); have_orig = 0; said = 0; }
+}
 static void ue3_tick(int present) {
     static int inited; static uint64_t frame; static int dump = -1;
     frame += present;
@@ -135,6 +166,7 @@ static void ue3_tick(int present) {
         const char *d = getenv("DM_UE3_DUMP"); dump = d && atoi(d) > 0;
         { void dm_nx_settings_start(void); extern char **environ; for (char **q = environ; *q; q++) if (!strncmp(*q, "DM_UE3_SCALE=", 13) || !strncmp(*q, "DM_UE3_RES=", 11) || !strncmp(*q, "DM_UE3_DYNRES", 13) || !strncmp(*q, "DM_UE3S_", 8)) { dm_nx_settings_start(); break; } }
     }
+    if (present) ue3_smooth_tick();
     if (dump && !present) dm_ue3_dump("device initialisation");
     if (dump && present && (frame == 1 || frame == 600)) dm_ue3_dump(frame == 1 ? "first frame" : "frame 600");
     if (!atomic_load(&g_any_held)) return;
@@ -173,13 +205,14 @@ static void nx_apply(const char *env, const char *v, int live) {
         // The size the game renders at (its window, viewport and render targets; 1280x720 as shipped): read by the engine when it starts, so a change takes a restart
         unsigned w = 0, h = 0; if (v && sscanf(v, "%ux%u", &w, &h) == 2 && w >= 640 && w <= 3840 && h >= 360 && h <= 2160) { char a[16], b[16]; snprintf(a, sizeof a, "%u", w); snprintf(b, sizeof b, "%u", h); dm_ue3_set("ResX", a); dm_ue3_set("ResY", b); }
         else { dm_ue3_set("ResX", ""); dm_ue3_set("ResY", ""); }
+    } else if (!strcmp(env, "DM_UE3_SMOOTH")) { atomic_store(&g_smooth_on, !(v && !strcmp(v, "game")));
     } else if (!strncmp(env, "DM_UE3S_", 8)) dm_ue3_set(env + 8, v && strcmp(v, "game") ? v : "");
     else return;
     if (live) dm_perf_mark(note);
 }
 // value NULL: whether env is one of these settings; otherwise applies it now. 1 when it is one
 int dm_nx_setting_live(const char *env, const char *value) {
-    if (!env || (strcmp(env, "DM_UE3_SCALE") && strcmp(env, "DM_UE3_RES") && strcmp(env, "DM_UE3_DYNRES") && strcmp(env, "DM_UE3_DYNRES_MIN") && strncmp(env, "DM_UE3S_", 8))) return 0;
+    if (!env || (strcmp(env, "DM_UE3_SCALE") && strcmp(env, "DM_UE3_RES") && strcmp(env, "DM_UE3_SMOOTH") && strcmp(env, "DM_UE3_DYNRES") && strcmp(env, "DM_UE3_DYNRES_MIN") && strncmp(env, "DM_UE3S_", 8))) return 0;
     if (!strncmp(env, "DM_UE3S_", 8) && !find_row(env + 8)) return 0;
     if (value) nx_apply(env, value, 1);
     return 1;
