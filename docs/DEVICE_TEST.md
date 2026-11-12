@@ -14,7 +14,7 @@ Start the app, press Play, wait up to a minute, then note:
 
 1. Does a picture appear at all? (Logos, then a title screen with "Press any button to start".)
 2. Do textures look right, or are there black, white or scrambled surfaces?
-3. Does a button on the DualSense (or a tap, if the touch controls are shown) get past the title screen? On the CI machines it does not, and the cause is not known yet.
+3. At the title screen hold **L1 and R1 together** (the Switch's L + R). The Switch version starts only on that pair, not on "any button": the title's own code checks for both shoulders held (`StartMenu.handleInput` in `gfx_startmenu_sf`). The first time, a licence agreement should come up next; accept it with ✕ (the Switch's A is the right-hand button, the DualSense's ○, unless the layout setting swaps them: try both).
 4. Does it crash or freeze? If so, roughly when.
 
 The first time each thing appears there will be stutter: the phone builds its GPU pipelines on first use and keeps them for later launches.
