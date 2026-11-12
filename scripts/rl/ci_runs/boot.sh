@@ -14,8 +14,13 @@ cd "$B/run" || exit 3
 # shellcheck disable=SC2086
 env DM_ROOT="$B" DM_ROMFS="$romfs" DM_SAVE="$B/run/save" DM_TEMP="$B/run/temp" DM_MSL_DIR="$B/shader/cache" DM_FONT_DIR="$B/font" \
     DM_NVN_SHMAP="$G/shader_map.tsv" DM_LANG=en-US DM_NVN_NULL=1 DM_WATCH_STALL=30 ${RL_RUN_ENV:-} \
-    perl -e 'alarm shift; exec @ARGV' "${RL_RUN_SECONDS:-120}" "$host" "$patched" ${RL_GAME_ARGS:+-- $RL_GAME_ARGS} > "$R/host.log" 2>&1
-rc=$?
+    DM_HLECOUNT="$B/run/hlecount.tsv" "$host" "$patched" ${RL_GAME_ARGS:+-- $RL_GAME_ARGS} > "$R/host.log" 2>&1 &
+pid=$!
+# The time limit ends the run as a player quitting would (SIGTERM: the host shuts down in order and writes its exports); a host that does not go within 15 s is killed
+( sleep "${RL_RUN_SECONDS:-120}"; kill -TERM $pid 2>/dev/null; sleep 15; kill -KILL $pid 2>/dev/null ) &
+killer=$!
+wait $pid; rc=$?
+kill $killer 2>/dev/null
 echo "host rc=$rc, $(wc -l < "$R/host.log") lines"
 for f in "$B"/run/*.csv "$B"/run/*.json "$B"/run/*.tsv; do [ -f "$f" ] && cp "$f" "$R/"; done   # DM_PERF_EXPORT / DM_NVN_TSV written into the run folder
 LC_ALL=C grep -aF "[RED]" "$R/host.log" | sed 's/^\[[^]]*\] //' | sort | uniq -c | sort -nr | head -80 > "$R/red.txt"
