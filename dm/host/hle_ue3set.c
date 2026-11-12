@@ -47,18 +47,22 @@ static void ue3_find(void) {
     uint8_t *b = m->base; uint64_t n = m->size;
     for (uint64_t o = 4; o + sizeof key <= n; o += 4) {
         if (memcmp(b + o, key, sizeof key)) continue;   // the text up to its end: in Rocket League 1.0 it is the tail of UpscaleScreenPercentage's (the linker merged them), and the row points into it
-        uint64_t want = (uint64_t)(b + o);
+        uint64_t want = (uint64_t)(b + o); int ptrs = 0;
+        LOG("ue3 settings: the text ScreenPercentage at main+%#llx", (unsigned long long)o);
         for (uint64_t s = 8; s + 48 <= n; s += 8) {   // the row whose name pointer is that text
             uint64_t v; memcpy(&v, b + s, 8); if (v != want) continue;
-            ue3_row r; if (!row_at(m, b + s - 8, &r)) continue;
+            ue3_row r; ptrs++;
+            if (!row_at(m, b + s - 8, &r)) { uint64_t q[6]; memcpy(q, b + s - 8, 48); LOG("ue3 settings: main+%#llx points to it but is no row: %#llx %#llx %#llx %#llx %#llx %#llx (main at %p, %#llx bytes)", (unsigned long long)(s - 8), (unsigned long long)q[0], (unsigned long long)q[1], (unsigned long long)q[2], (unsigned long long)q[3], (unsigned long long)q[4], (unsigned long long)q[5], (void *)b, (unsigned long long)n); continue; }
             uint64_t first = s - 8; while (first >= 48 && row_at(m, b + first - 48, &r)) first -= 48;
             int k = 0; for (uint64_t e = first; e + 48 <= n && k < UE3_MAX && row_at(m, b + e, &g_row[k]); e += 48) k++;
-            if (k < 8) continue;   // a lone look-alike
+            if (k < 8) { LOG("ue3 settings: only %d rows around main+%#llx", k, (unsigned long long)(s - 8)); continue; }   // a lone look-alike
             g_nrow = k;
             LOG("ue3 settings: %d system settings described at main+%#llx (the variables at main+%#llx..)", k, (unsigned long long)first, (unsigned long long)(g_row[0].var - b));
             return;
         }
+        LOG("ue3 settings: %d pointers to that text, none in a table", ptrs);
     }
+    LOG("ue3 settings: no table found in main (%p, %#llx bytes)", (void *)b, (unsigned long long)n);
 }
 static ue3_row *find_row(const char *name) {
     pthread_once(&g_once, ue3_find);
