@@ -128,6 +128,7 @@ void dm_ue3set_tick(void) {
             free(s);
         }
         const char *d = getenv("DM_UE3_DUMP"); dump = d && atoi(d) > 0;
+        { void dm_nx_settings_start(void); extern char **environ; for (char **q = environ; *q; q++) if (!strncmp(*q, "NX_RENDER_SCALE=", 16) || !strncmp(*q, "NX_DYNRES", 9) || !strncmp(*q, "NX_UE3_", 7)) { dm_nx_settings_start(); break; } }
     }
     if (dump && (frame == 1 || frame == 600)) dm_ue3_dump(frame == 1 ? "first frame" : "frame 600");
     if (!atomic_load(&g_any_held)) return;
@@ -140,4 +141,46 @@ void dm_ue3set_tick(void) {
         memcpy(r->var, &r->want, 4);
     }
     pthread_mutex_unlock(&g_mu);
+}
+
+// ---------- The player's settings that are system settings underneath (dm/games/settings.tsv, shown for a profile with ue3_settings on) ----------
+//   NX_RENDER_SCALE=0.5..1.0     the 3D picture's size: below 1.0 ScreenPercentage is held at that percentage and the game's dynamic resolution is off (it would move it);
+//                                1.0 leaves both to the game
+//   NX_DYNRES=game|off           off holds AllowDynamicResolution at 0: the game renders its full size for the console mode
+//   NX_DYNRES_MIN=0.5..1.0       with NX_DYNRES=game: the lowest scale its dynamic resolution may go to (MinimumScreenScale), 0 = the game's own
+//   NX_UE3_<Setting>=game|<value>   any row of the table by name (NX_UE3_MotionBlur=0, NX_UE3_MaxShadowResolution=512): game leaves it alone
+// Read when the game starts (every present thread's first tick) and applied again by dm_nx_setting_live when the panel or the in-game menu changes one.
+void dm_perf_mark(const char *what);
+__attribute__((weak)) void dm_perf_mark(const char *what) { (void)what; }
+static void nx_apply(const char *env, const char *v, int live) {
+    char note[160]; snprintf(note, sizeof note, "%s=%s", env, v ? v : "");
+    if (!strcmp(env, "NX_RENDER_SCALE")) {
+        float s = v ? strtof(v, NULL) : 1.0f;
+        if (!(s >= 0.25f && s < 0.9999f)) { dm_ue3_set("ScreenPercentage", ""); if (!getenv("NX_DYNRES") || strcmp(getenv("NX_DYNRES"), "off")) dm_ue3_set("AllowDynamicResolution", ""); }
+        else { char p[16]; snprintf(p, sizeof p, "%g", s * 100.0f); dm_ue3_set("ScreenPercentage", p); dm_ue3_set("AllowDynamicResolution", "0"); }
+    } else if (!strcmp(env, "NX_DYNRES")) {
+        const char *rs = getenv("NX_RENDER_SCALE"); int scaled = rs && strtof(rs, NULL) < 0.9999f && strtof(rs, NULL) >= 0.25f;
+        dm_ue3_set("AllowDynamicResolution", v && !strcmp(v, "off") ? "0" : scaled ? "0" : "");
+    } else if (!strcmp(env, "NX_DYNRES_MIN")) {
+        float s = v ? strtof(v, NULL) : 0; if (s >= 0.25f && s <= 1.0f) { char p[16]; snprintf(p, sizeof p, "%g", s); dm_ue3_set("MinimumScreenScale", p); } else dm_ue3_set("MinimumScreenScale", "");
+    } else if (!strncmp(env, "NX_UE3_", 7)) dm_ue3_set(env + 7, v && strcmp(v, "game") ? v : "");
+    else return;
+    if (live) dm_perf_mark(note);
+}
+// value NULL: whether env is one of these settings; otherwise applies it now. 1 when it is one
+int dm_nx_setting_live(const char *env, const char *value) {
+    if (!env || (strcmp(env, "NX_RENDER_SCALE") && strcmp(env, "NX_DYNRES") && strcmp(env, "NX_DYNRES_MIN") && strncmp(env, "NX_UE3_", 7))) return 0;
+    if (!strncmp(env, "NX_UE3_", 7) && !find_row(env + 7)) return 0;
+    if (value) nx_apply(env, value, 1);
+    return 1;
+}
+void dm_nx_settings_start(void) {
+    pthread_once(&g_once, ue3_find); if (!g_nrow) return;
+    extern char **environ;
+    for (char **e = environ; *e; e++) {
+        if (strncmp(*e, "NX_", 3)) continue;
+        const char *eq = strchr(*e, '='); if (!eq) continue;
+        char k[80]; snprintf(k, sizeof k, "%.*s", (int)(eq - *e), *e);
+        nx_apply(k, eq + 1, 0);
+    }
 }
