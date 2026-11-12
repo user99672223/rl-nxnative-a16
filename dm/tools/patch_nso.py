@@ -864,7 +864,7 @@ def check_before_copy(insl, ctx, ld, idx):
         if writes(p) & (idx | {src}): return None
     else: return None
     return ctx[k - 2]
-def jump_offsets(insl, j, copy_first=False, far_base=False, forward_base=False):
+def jump_offsets(insl, j, copy_first=False, far_base=False, forward_base=False, back=16):
     """The br x18 is preceded by the offset-table form (Engage main+0x12eec94): cmp w18,#N; b.hi; ldrsw x18,[xB,x18,lsl #2]; add x18,x18,xB.
     The index may be another register, and the bounds check may be on a register copied into it: Link's Awakening's GLSLC (subsdk0+0x1be6e8) has
     sub w0,w18,#0xd1; cmp w0,#0x31; b.hi; ldrsw x18,[x17,x0,lsl #2], its movie module (subsdk1+0xae9a4) cmp w21,#7; b.hi; ...; mov w18,w21; ldrsw x18,[x4,x18,lsl #2].
@@ -874,7 +874,9 @@ def jump_offsets(insl, j, copy_first=False, far_base=False, forward_base=False):
     256 instructions was set further back, and its writer chain is followed to the function's start (table_base far), every target an instruction of the function: ASTRAL CHAIN main+0x6db498
     and +0x6db70c load bases set 441 and 549 instructions before, x24 in the function's first block and x3 after it, which the loop around their dispatches keeps. A function-wide search
     for the one adrp + add pair that fits (table_cands, as jump_adr_offsets does) finds two for x3 there, the other a table of its own further on. Returns all targets, or None if not recognized"""
-    ctx = insl[max(0, j - 16):j]
+    # back: how far before the br the form may start. 16 everywhere but in the last attempt: Rocket League 1.0 main+0xbe78f4 (Panic Button's Unreal Engine 3) has eight loads
+    # of the function's own between the table load and the br, so its check (and w8,w17,#0xff; cmp w8,#6; b.hi) is 17 to 19 instructions back
+    ctx = insl[max(0, j - back):j]
     add = next((p for p in reversed(ctx) if p.mnemonic == 'add' and re.fullmatch(r'x18, x\d+, x\d+', p.op_str)), None)
     if not add: return None
     _, t, rb = add.op_str.split(', ')   # t = the loaded entry, rb = the table base
@@ -1423,6 +1425,7 @@ for fa, fb in funcs:
                 if not tgt: tgt = jump_masked_not(insl, j)   # a complemented low-bit index with its zero case branched away: exactly mask entries
                 if not tgt: tgt = jump_offsets(insl, j, copy_first=True, far_base=True, forward_base=True)   # a unique base initialized in a later block that branches backward
                 if not tgt: tgt = jump_zero_extended(insl, j)   # a 32-bit checked value zero-extended into the index, with its full path to the br verified
+                if not tgt: tgt = jump_offsets(insl, j, back=32)   # the same offset-table form with more of the function's own instructions between its check and the br
                 assert tgt, f'jump table {ins.address:x}'
                 tabjumps[ins.address] = tgt; continue
             jumps[ins.address] = (base, width)
