@@ -202,6 +202,8 @@ Read this first in every session. Newest status at the top of each section.
 | 43187034962 | fences inline | 29 | 138 |
 | 43187053178 | fences inline + `DM_UE3_KICK=merge` | 26 | 112 |
 | 43187070052 | the same + `DM_NVN_TBDR=1` | 29 | 127 |
+| 43175097487 | 2560x1440, before | 36 | 966 |
+| 43187087202 | 2560x1440, fences inline + `DM_UE3_KICK=merge` | 25 | 424 |
 
   (`DM_NVN_TBDR=1` turns the waiting-clear path off, `lc_on`, which is why it has more passes here.)
 - Input: the game does read the presses (probe of its pad object, run 43189985782: buttons 0x1 / 0x2 / 0x400 while A /

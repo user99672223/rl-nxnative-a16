@@ -102,7 +102,7 @@ Addresses are offsets into the 1.0 `main` (build `becfed979bb4204fbd0945cd450fb2
 
 **Changed.** A rewriter stub (`dm/games/01005EE0036EC000/patches.py` `kick_gate`) returns from the kick at once while a flag is set; the flag is a system setting no code reads, held by the host. Setting Render pass merging (`DM_UE3_KICK`: Game's own / Merged).
 
-**Measured.** With item 11: 29 → 26 passes, 138 → 112 MB. One submission a frame instead of 14.
+**Measured.** With item 11: 29 → 26 passes, 138 → 112 MB. One submission a frame instead of 14. At 2560x1440 with both: 36 → 25 passes, 966 → 424 MB a frame (run 43187087202).
 
 **Risk.** The GPU starts on the frame when the frame's list is complete rather than during it. Default is the game's own until the merged frame has been seen on a real GPU.
 
