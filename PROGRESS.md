@@ -166,6 +166,25 @@ Read this first in every session. Newest status at the top of each section.
   ticks at about 25 a second on the CI Mac. Each tick also resubmits a network request (`main+0xaca218`, the online
   subsystem's reconnect loop; instant in the host). At boot `main+0xab7f90` sleeps 1 s while the request is "on hold".
 
+### Native 1440p boots; menu measurements (2026-11-12 ~09:00 local)
+
+| run | settings | window | passes / frame | draws | attachment load+store / frame | peak memory |
+|---|---|---|---|---|---|---|
+| 43173025823 | as shipped | 1280x720 | 38 | 143 | 241 MB | 2,354 MiB |
+| 43169272803 | `DM_NVN_TBDR=1` | 1280x720 | 38 | 143 | 190 MB | – |
+| 43173040846 | `DM_UE3_KICK=merge` | 1280x720 | 35 | 142 | 215 MB | – |
+| 43175097487 | `DM_UE3_RES=2560x1440` | **2560x1440** | 36 | 143 | **966 MB** | 2,511 MiB |
+| 43175174078 | `NX_FORCE_ASTC_ONLY=1` + pack | 1280x720 | – | – | – | 2,199 MiB |
+
+- 1440p: the pool stub works (no fault), 120 s, under the 4,000 MiB budget. The traffic is 4x: at 60 fps 58 GB/s of
+  attachment loads and stores for a *menu* frame, more than an A16 can move. Native 1440p at 60 needs the passes merged.
+- `DM_UE3_KICK=merge` removes the kicks but only 3 passes: the UI's draws are each followed by the render command
+  "BlockUntilGPUIdle" (`main+0x27ae74` FlushRenderingCommands → `main+0xa9597c` → flush + `nvnQueueFinish`), about ten
+  times a frame: a CPU–GPU round trip each, which also ends the pass. Probe run 43177541723 names the callers.
+- Smoothing hold applies (min 22 → 62) and does not change the CI tick rate (25–33 a second): not the cause.
+- ASTC-only at the menu: 200 s, clean exit, 12 textures not in the pack (CPU-decoded: 64x64 ones, one 640x640, two
+  1024x1024 with 11 levels): to look at.
+
 ## CI loops (all manual-dispatch or push to main; logs with game data are encrypted)
 
 | What | How | Time |
