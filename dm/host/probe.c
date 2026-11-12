@@ -146,7 +146,8 @@ static int probe_hit(ucontext_t *uc) {   // Registered by probe_install with the
             uint8_t b[16]; vm_size_t got = 0;
             int dr = (g_probe[i].dump >> 25) & 31;                                    // @xN+offset: based on xN
             uint64_t at = uc->uc_mcontext->__ss.__x[dr] + (g_probe[i].dump & 0xffffff);
-            if (g_probe[i].dump & 0x1000000) { uint64_t p = 0; vm_size_t g = 0; if (!vm_read_overwrite(mach_task_self(), at, 8, (vm_address_t)&p, &g) && p) at = p + g_probe[i].dpost; else at = 0; }   // @*offset[+post]: dereference first, then dump (post bytes further on)
+            if (g_probe[i].dump & 0x1000000) { uint64_t p = 0; vm_size_t g = 0; if (!vm_read_overwrite(mach_task_self(), at, 8, (vm_address_t)&p, &g) && p) at = p + g_probe[i].dpost; else at = 0; }
+            if (at && (g_probe[i].dump & 0x40000000)) { uint64_t p = 0; vm_size_t g = 0; if (!vm_read_overwrite(mach_task_self(), at, 8, (vm_address_t)&p, &g) && p) at = p; else at = 0; if (at) { fputs(" **", stderr); probe_str(at); } }   // @*offset[+post]: dereference first, then dump (post bytes further on)
             if (at && !vm_read_overwrite(mach_task_self(), at, 16, (vm_address_t)b, &got) && got == 16) {
                 fprintf(stderr, " [%sx%d+%#lx]", (g_probe[i].dump & 0x1000000) ? "*" : "", dr, g_probe[i].dump & 0xffffff);
                 if (g_probe[i].dpost) fprintf(stderr, "+%#lx", g_probe[i].dpost);
@@ -430,6 +431,7 @@ void probe_install(void) {
             if (at_) {   // @offset / @*offset / @xN+offset / @*xN+offset / @*xN+offset+post (the dereferenced pointer plus post: @*x0+48+8 = an al::LiveActor's position, al::getTrans)
                 const char *q = at_ + 1; long deref = 0, reg = 0; char *e3;
                 if (*q == '*') { deref = 0x1000000; q++; }
+                if (*q == '*') { deref |= 0x40000000; q++; }   // @**xN+offset: a pointer to a pointer (a Scaleform managed string in a GFx::Value)
                 if (*q == 'x') { char *e2; reg = strtol(q + 1, &e2, 10) & 31; q = *e2 == '+' ? e2 + 1 : e2; }
                 dump = deref | (reg << 25) | (strtol(q, &e3, 16) & 0xffffff);
                 if (deref && *e3 == '+') post = strtol(e3 + 1, 0, 16);
