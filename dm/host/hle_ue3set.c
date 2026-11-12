@@ -116,9 +116,14 @@ void dm_ue3_dump(const char *why) {
     }
 }
 // Every present (hle_nvn.c): the held settings are written wherever the game has another value
-void dm_ue3set_tick(void) {
+static void ue3_tick(int present);
+// When the game makes its NVN device (hle_nvn.c): Unreal has read its settings by then and sizes its window and render targets from ResX / ResY right after
+// (main+0xab43cc), so settings held from the start must be in place before the first present
+void dm_ue3set_early(void) { ue3_tick(0); }
+void dm_ue3set_tick(void) { ue3_tick(1); }
+static void ue3_tick(int present) {
     static int inited; static uint64_t frame; static int dump = -1;
-    frame++;
+    frame += present;
     if (!inited) {
         inited = 1;
         const char *e = getenv("DM_UE3_SET");
@@ -128,9 +133,10 @@ void dm_ue3set_tick(void) {
             free(s);
         }
         const char *d = getenv("DM_UE3_DUMP"); dump = d && atoi(d) > 0;
-        { void dm_nx_settings_start(void); extern char **environ; for (char **q = environ; *q; q++) if (!strncmp(*q, "DM_UE3_SCALE=", 13) || !strncmp(*q, "DM_UE3_DYNRES", 13) || !strncmp(*q, "DM_UE3S_", 8)) { dm_nx_settings_start(); break; } }
+        { void dm_nx_settings_start(void); extern char **environ; for (char **q = environ; *q; q++) if (!strncmp(*q, "DM_UE3_SCALE=", 13) || !strncmp(*q, "DM_UE3_RES=", 11) || !strncmp(*q, "DM_UE3_DYNRES", 13) || !strncmp(*q, "DM_UE3S_", 8)) { dm_nx_settings_start(); break; } }
     }
-    if (dump && (frame == 1 || frame == 600)) dm_ue3_dump(frame == 1 ? "first frame" : "frame 600");
+    if (dump && !present) dm_ue3_dump("device initialisation");
+    if (dump && present && (frame == 1 || frame == 600)) dm_ue3_dump(frame == 1 ? "first frame" : "frame 600");
     if (!atomic_load(&g_any_held)) return;
     pthread_mutex_lock(&g_mu);
     for (int i = 0; i < g_nrow; i++) {
@@ -163,13 +169,17 @@ static void nx_apply(const char *env, const char *v, int live) {
         dm_ue3_set("AllowDynamicResolution", v && !strcmp(v, "off") ? "0" : scaled ? "0" : "");
     } else if (!strcmp(env, "DM_UE3_DYNRES_MIN")) {
         float s = v ? strtof(v, NULL) : 0; if (s >= 0.25f && s <= 1.0f) { char p[16]; snprintf(p, sizeof p, "%g", s); dm_ue3_set("MinimumScreenScale", p); } else dm_ue3_set("MinimumScreenScale", "");
+    } else if (!strcmp(env, "DM_UE3_RES")) {
+        // The size the game renders at (its window, viewport and render targets; 1280x720 as shipped): read by the engine when it starts, so a change takes a restart
+        unsigned w = 0, h = 0; if (v && sscanf(v, "%ux%u", &w, &h) == 2 && w >= 640 && w <= 3840 && h >= 360 && h <= 2160) { char a[16], b[16]; snprintf(a, sizeof a, "%u", w); snprintf(b, sizeof b, "%u", h); dm_ue3_set("ResX", a); dm_ue3_set("ResY", b); }
+        else { dm_ue3_set("ResX", ""); dm_ue3_set("ResY", ""); }
     } else if (!strncmp(env, "DM_UE3S_", 8)) dm_ue3_set(env + 8, v && strcmp(v, "game") ? v : "");
     else return;
     if (live) dm_perf_mark(note);
 }
 // value NULL: whether env is one of these settings; otherwise applies it now. 1 when it is one
 int dm_nx_setting_live(const char *env, const char *value) {
-    if (!env || (strcmp(env, "DM_UE3_SCALE") && strcmp(env, "DM_UE3_DYNRES") && strcmp(env, "DM_UE3_DYNRES_MIN") && strncmp(env, "DM_UE3S_", 8))) return 0;
+    if (!env || (strcmp(env, "DM_UE3_SCALE") && strcmp(env, "DM_UE3_RES") && strcmp(env, "DM_UE3_DYNRES") && strcmp(env, "DM_UE3_DYNRES_MIN") && strncmp(env, "DM_UE3S_", 8))) return 0;
     if (!strncmp(env, "DM_UE3S_", 8) && !find_row(env + 8)) return 0;
     if (value) nx_apply(env, value, 1);
     return 1;
