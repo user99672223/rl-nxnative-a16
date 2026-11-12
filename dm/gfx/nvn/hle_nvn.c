@@ -1929,6 +1929,9 @@ static double pres_expect_ms(uint64_t n) {   // the interval between presents n 
     return held > tgt ? held : tgt;
 }
 __attribute__((weak)) double dm_brightness_now(void) { return -1; }
+// The host's performance record (dm/host/hle_perf.c, dm_perf.h): a row per frame for the diagnostic panel and the exported log; these defaults are for builds without it (unit tests)
+__attribute__((weak)) void dm_perf_frame(uint64_t frame, double frame_ms, double work_ms, unsigned passes, unsigned draws, double rt_load_mb, double rt_store_mb, unsigned pso_new) { (void)frame; (void)frame_ms; (void)work_ms; (void)passes; (void)draws; (void)rt_load_mb; (void)rt_store_mb; (void)pso_new; }
+__attribute__((weak)) void dm_perf_gpu(uint64_t frame, double gpu_ms) { (void)frame; (void)gpu_ms; }
 __attribute__((weak)) void dm_perf_present(double iv_ms) { (void)iv_ms; }   // Default (unit tests); strong definition in the host's diag.c: always-on performance record perf.txt
 uint64_t dm_nvn_sub_cpu_ns(void) { return atomic_load(&g_cum_sub_cpu_ns); }   // Cumulative CPU nanoseconds of submit (excluding present)
 __attribute__((weak)) int dm_thermal_now(void) { return -1; }   // Default (Mac); overridden by iOS front_ios.m   // default (Mac); the strong definition in the iOS front end front_ios.m overrides it
@@ -2491,7 +2494,8 @@ NVN(nvnQueuePresentTexture, void, NVNqueue *q, NVNwindow *w, int idx) {
         }
         trow(f, "@passes", (double)(ps - prev_pass)); trow(f, "@draws", (double)(dr - prev_draw));
         static uint64_t pl, pst, pf, pudc; uint64_t l, st, fu; mtl_bw(&l, &st, &fu);
-        trow(f, "@rt_load_mb", (l - pl) / 1048576.0); trow(f, "@rt_store_mb", (st - pst) / 1048576.0); trow(f, "@pass_full_rw", (double)(fu - pf));
+        double rt_load_mb = (l - pl) / 1048576.0, rt_store_mb = (st - pst) / 1048576.0;
+        trow(f, "@rt_load_mb", rt_load_mb); trow(f, "@rt_store_mb", rt_store_mb); trow(f, "@pass_full_rw", (double)(fu - pf));
         uint64_t udc = mtl_udc_saved_bytes(); trow(f, "@unwritten_dc_mb", (udc - pudc) / 1048576.0);
         pl = l; pst = st; pf = fu; pudc = udc;
         static uint64_t pae, par, pap; uint64_t ae_, ar_, ap_; mtl_args_stats(&ae_, &ar_, &ap_);
@@ -2514,13 +2518,14 @@ NVN(nvnQueuePresentTexture, void, NVNqueue *q, NVNwindow *w, int idx) {
             r->make_ms = ((lns - plns) + (pns - ppns)) / 1e6; r->up = (unsigned)(up - pup); r->rup = (unsigned)(rup - prup); r->up_mb = (ub - pub) / 1048576.0; r->up_ms = up_ms;
             r->hy = (unsigned)(hy - phy); plns = lns; ppns = pns; pup = up; prup = rup; pub = ub; phy = hy;
         }
+        dm_perf_frame(f, fr, wk, (unsigned)(ps - prev_pass), (unsigned)(dr - prev_draw), rt_load_mb, rt_store_mb, (unsigned)(pso_ - ppso));
         plib = lib_; ppso = pso_;
         trow(f, "@t_s", (now_ns() - g_t0_ns) / 1e9);
         trow(f, "@drawable_ms", mtl_drawable_ns_take() / 1e6);
         trow(f, "@sub_wall_ms", atomic_exchange(&g_sub_wall_ns, 0) / 1e6); trow(f, "@sub_cpu_ms", atomic_exchange(&g_sub_cpu_ns, 0) / 1e6); trow(f, "@sub_instr", (double)atomic_exchange(&g_sub_instr, 0));
     } else atomic_store(&g_nvn_ns, 0);
     g_acq_wait_ns = g_pq_wait_ns = 0;
-    if (f >= 8) { double g = mtl_gpu_ms(f - 8); if (g >= 0) { tpush(3, g); trow(f - 8, "@gpu_ms", g); g_hr[g_hn++ % HRN] = g; }   // GPU time is taken 8 frames late (already completed)
+    if (f >= 8) { double g = mtl_gpu_ms(f - 8); if (g >= 0) { tpush(3, g); trow(f - 8, "@gpu_ms", g); g_hr[g_hn++ % HRN] = g; dm_perf_gpu(f - 8, g); }   // GPU time is taken 8 frames late (already completed)
         { lf_rec *r = &g_lf[(f - 8) % LFN]; if (g >= 0 && r->f == f - 8) mtl_ab_gpu(f - 8, g, r->fr); }   // DM_AB phases
         { lf_rec *r = &g_lf[(f - 8) % LFN];   // long-frame log (on by default, DM_LONGFRAME=0 turns it off): a line is printed only when the whole frame > 20 ms or GPU > 16.7 ms, and it is clearly above recent conditions
           static int on = -1; if (on < 0) { const char *e = getenv("DM_LONGFRAME"); on = !(e && !strcmp(e, "0")); }
