@@ -5,6 +5,11 @@
 > no firmware**, and none are distributed through it: you need your own legally obtained copy of the game
 > and your own console keys. Everything here builds on [seedds/nxnative](https://github.com/seedds/nxnative)
 > (MIT); third-party code keeps its own licenses ([dm/third_party](dm/third_party/README.md)).
+>
+> What this fork adds: the game's profile ([dm/games/01005EE0036EC000](dm/games/01005EE0036EC000/README.md)); BC textures re-encoded as ASTC for
+> GPUs without BC formats ([docs/optimizations.md](docs/optimizations.md)); a diagnostic panel with a performance log export, output to a monitor at
+> up to 1440p and a memory budget switch; a "null GPU" so the game can be booted and measured on machines without Metal 4. The build runs offline
+> only: every network service the game asks for answers "no connection". The fork is not affiliated with Psyonix, Epic Games, Panic Button or Nintendo.
 
 Play your own Nintendo Switch and Switch 2 games natively on Apple silicon Macs, iPhone and iPad. One script packs your game into a Mac app or an unsigned IPA that you sideload.
 
