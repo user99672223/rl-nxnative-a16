@@ -144,11 +144,13 @@ static void ue3_smooth_tick(void) {
         for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main")) m = &g_mod[i];
         for (int i = 0; m && i < (int)(sizeof k_smooth / sizeof k_smooth[0]); i++) if (!strcmp(m->build_id, k_smooth[i].build)) row = i;
     }
+    { static int once; if (!once++) LOG("ue3 settings: frame-rate smoothing: main build %s, %s", m ? m->build_id : "(no main)", row < 0 ? "no row for it" : "row found"); }
     if (row < 0) return;
     int on = atomic_load(&g_smooth_on);
     if (on < 0) { const char *e = getenv("DM_UE3_SMOOTH"); on = !(e && !strcmp(e, "game")); atomic_store(&g_smooth_on, on); }
     uint64_t eng; memcpy(&eng, m->base + k_smooth[row].engine, 8); if (eng < 0x10000) return;   // GEngine is not made yet
     float mx, mn; memcpy(&mx, (uint8_t *)eng + k_smooth[row].max, 4); memcpy(&mn, (uint8_t *)eng + k_smooth[row].min, 4);
+    { static int n; if (n < 3 && ++n) LOG("ue3 settings: frame-rate smoothing: GEngine %#llx, maximum %g, minimum %g", (unsigned long long)eng, mx, mn); }
     if (!(mx >= 30.0f && mx <= 480.0f) || !(mn >= 1.0f && mn <= 480.0f)) return;   // not the config's values (yet)
     if (on && mn != mx) {
         if (!have_orig) { orig = mn; have_orig = 1; }
