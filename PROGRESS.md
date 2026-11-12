@@ -35,6 +35,12 @@ Read this first in every session. Newest status at the top of each section.
    Rocket League's packages are Oodle-compressed chunks (no encoder available, sizes would change). Plan: a pack-time
    cache keyed by the hash of each texture level's BC bytes → ASTC blob, looked up at upload; CPU decode fallback for misses.
 3. **Encrypted inputs key** is an age identity (see Layout), not an `age -p` passphrase.
+4. **The game itself cannot run in the iOS Simulator** (upstream `docs/development.md`: "The iOS Simulator cannot run the
+   game's code"; the host depends on device memory mapping the Simulator lacks). So Definition-of-done item 2 is met in
+   two halves: the *game* runs on the Mac host with `NX_FORCE_ASTC_ONLY=1` and `NX_MEMORY_BUDGET_MB=4000` (same host
+   code as the iPhone's), and the *iOS front end* (panel, export, monitor, DualSense) runs in the Simulator's XCTest harness.
+5. **Native resolution before upscaling** (owner, 2026-11-12): the 1.0 game renders 720p, so the target is the engine
+   itself rendering 2560x1440 (`DM_UE3_RES`), with render scale / dynamic resolution / MetalFX as the fallback.
 
 ## Status (updated 2026-11-12 ~05:55 local)
 
