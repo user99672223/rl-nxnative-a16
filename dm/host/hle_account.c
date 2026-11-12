@@ -43,6 +43,10 @@ HLE_FORCE("_ZN2nn7account8OpenUserEPNS0_10UserHandleERKNS0_3UidE", "open user; t
     h->v[0] = uid->v[0]; h->v[1] = uid->v[1]; h->v[2] = HANDLE_MAGIC; return RES_OK;
 }
 HLE_FORCE("_ZN2nn7account9GetUserIdEPNS0_3UidERKNS0_10UserHandleE", "gets the Uid from the handle", Result, h_acc_GetUserId, Uid *out, const UserHandle *h) {
+    // A handle that was never opened (all zero): Rocket League 1.0 keeps a handle per player slot (main+0x2fd3a88, three words each) and asks for the slot's user before it has
+    // opened one (main+0xaa495c, from main+0xabfc34 at boot), with the Uid preset to the invalid one and the result ignored; it opens the preselected user when the Uid comes back
+    // invalid. So such a handle fails and the Uid is left as the caller set it. Any other handle the host did not issue is still a host error
+    if (!h->v[0] && !h->v[1] && !h->v[2]) { static int once; if (!once++) LOG("account::GetUserId of a handle that was never opened: fails, the Uid is left as it was"); return RES_FAIL; }
     if (h->v[2] != HANDLE_MAGIC) die("account::GetUserId: the handle was not issued by the host (%#llx)", h->v[2]);
     out->v[0] = h->v[0]; out->v[1] = h->v[1]; return RES_OK;
 }
