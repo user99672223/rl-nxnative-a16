@@ -11,9 +11,10 @@ T="$B/tools/astc"; mkdir -p "$T"
 if [ ! -x "$T/bc2astc" ]; then
   # Arm's astcenc (Apache 2.0), built here: not part of this repository
   if [ ! -d "$T/astc-encoder" ]; then git clone -q --depth 1 --branch 5.2.0 https://github.com/ARM-software/astc-encoder.git "$T/astc-encoder" || exit 3; fi
-  cmake -S "$T/astc-encoder" -B "$T/astc-build" -DCMAKE_BUILD_TYPE=Release -DASTCENC_ISA_NEON=ON -DASTCENC_CLI=OFF -DASTCENC_SHAREDLIB=OFF >/dev/null || exit 3
+  rm -rf "$T/astc-build"
+  cmake -S "$T/astc-encoder" -B "$T/astc-build" -DCMAKE_BUILD_TYPE=Release -DASTCENC_ISA_NEON=ON -DASTCENC_UNIVERSAL_BUILD=OFF -DCMAKE_OSX_ARCHITECTURES=arm64 -DASTCENC_CLI=OFF -DASTCENC_SHAREDLIB=OFF >/dev/null || exit 3
   cmake --build "$T/astc-build" -j "$(sysctl -n hw.ncpu)" >/dev/null || exit 3
-  lib=$(find "$T/astc-build" -name 'libastcenc*-static.a' | head -1); echo "astcenc library: $lib"
+  lib=$(find "$T/astc-build" -name 'libastcenc*neon*-static.a' | head -1); echo "astcenc library: $lib"   # the NEON one: a universal build also leaves an x86 library there
   c++ -O2 -std=c++17 -I"$T/astc-encoder/Source" "$GITHUB_WORKSPACE/dm/tools/bc_astc/bc2astc.cpp" "$lib" -o "$T/bc2astc" || exit 3
 fi
 python -m pip -q install pycryptodome >/dev/null 2>&1 || true
