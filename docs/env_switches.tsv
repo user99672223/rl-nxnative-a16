@@ -3,6 +3,7 @@ DM_AB	diagnostic	`=<frames>` splits the run into phases of that many frames and 
 DM_ALIAS_SIZE	diagnostic	`=<bytes>` gives the guest an alias region of that size instead of the platform's, which is at least the Switch's 64 GB on the Mac and the profile's `mem_alias` on an iPhone (at least 256 MB, whole host pages; the heap and stacks stay as they are): the profile's value reproduces an iPhone's address space on the Mac, as the NSP script's heap check does; its address region check sets 64 GB (Mac only: an iPhone has no room)
 DM_ALIAS_WINDOWS	diagnostic	`=<MB>` logs every 30 s how much of each window of that size in the alias region is mapped (windows aligned to their size in absolute addresses)
 DM_ALLOW_OTHER_METAL	switch	`1` lets `own_compilers.py` build the shader libraries with a Metal compiler other than the one in `dmsh_chain.lock` (it stops otherwise, GitHub issue #242); the NSP script sets it for `--allow-other-metal`
+DM_ANISO	player	`0` the game's own anisotropy, `1` to `16` a level for every trilinear sampler (`nvn_mtl.m` `aniso_override`); the launcher's Anisotropic filtering, changeable while the game runs
 DM_AOC_DIR	path	Folder of add-on content: one numbered subfolder per DLC index holding that DLC's RomFS, reported by `aoc` and mounted read-only; the app, the Mac launcher and the NSP script set it when the build has DLC
 DM_AOC_OWNED	switch	`0` reports no add-on content even when `DM_AOC_DIR` has some, for runs without the DLC
 DM_APP_DM	path	Set by the iOS app of a game of several programs: the running program's `dm/p<N>` folder, where the settings screen finds its `launcher.json`
@@ -12,6 +13,8 @@ DM_AUDIO_DUMP	diagnostic	`=<file>` writes every PCM block the game appends as is
 DM_AUDIO_MUTE	switch	`=1` runs the real Core Audio output path (callback pacing, background take-over) with the output silenced, for lifecycle tests on the Mac without noise
 DM_AUDREN_TRACE	diagnostic	When set, the CPU audio renderer logs every update with the number of frames rendered since the previous one
 DM_AV1_DAV1D	switch	`=1` decodes AV1 movies with dav1d even where VideoToolbox decodes AV1 (Apple M3 and A17 Pro on), to compare the two or to check the path older chips take (`hle_movie_av1.c`)
+DM_BCSUB_PACK	path	`=<path>` the ASTC pack of the game's BC textures (`dm/tools/ue3_astc.py`), used on a GPU without BC texture formats and with `NX_FORCE_ASTC_ONLY=1` (`nvn_mtl.m` `pkg_upload_bcs`); the iOS app sets it to `dm/bc_astc.pack` in its bundle or `Documents/bc_astc.pack`
+DM_BCSUB_PACK_FILE	path	`=<bc_astc.pack>` (build) `dm/ios/tools/build_ipa.sh` puts that ASTC pack into the app as `dm/bc_astc.pack`
 DM_BOOTPROF	diagnostic	When set, logs boot timing: the loader's breakdown (mapping, relocation, probes), Metal library loading, pipeline creation, texture uploads and the first present
 DM_BUNDLE_ID	switch	Overrides the iOS app's bundle ID in `build_ipa.sh` (default `org.nxnative.<title ID in lowercase>`)
 DM_CHEATS	path	Folder of Atmosphère cheat files: `<folder>/<build ID>.txt` or an SD-card layout (`atmosphere/contents/<title ID>/cheats/`) under it (default `<DM_ROOT>/cheats`); the Mac menu lists and toggles them
@@ -177,6 +180,7 @@ DM_NVN_LAZY_CLEAR	switch	`0` makes clears with no draw after them open a pass of
 DM_NVN_LOADPROBE	diagnostic	`=1`, `2` or `3`: attachments whose load is skipped are cleared to a sentinel colour (`3` NaN; `1` NaN for float formats) and the sentinel pixels left at pass end are counted (should be 0)
 DM_NVN_LOG	diagnostic	`=1` logs the creation of NVN objects
 DM_NVN_MAGSCAN	diagnostic	`=<fs key>[:every[:phase]]`: device self-check that reads each pass's colour attachments every `every` frames (default 30) and logs `[mag]` lines for solid magenta 16×16 blocks or non-finite pixels
+DM_NVN_NULL	diagnostic	`1` runs the NVN layer on the null GPU when the device has no Metal 4 (a virtual Mac, the Simulator there): every Metal 4 object is a stand-in, commits report at once, nothing is drawn (`dm/gfx/nvn/nvn_null.h`); a device with Metal 4 ignores it
 DM_NVN_PARTIAL_UPLOAD	switch	`0` reads a texture whole from its storage at every re-upload; by default a re-upload reads only the images (a layer's level) with a page written since the last upload and copies the others from the texture it replaces
 DM_NVN_PASSDUMP	diagnostic	`=<f>`, `<f1>-<f2>` or `every:<n>`: logs every render pass of those frames (attachments, clears, shader keys, bindings, draw state, presents, and the host function and line that ended each pass) for the `tbdr_*.py` tools
 DM_NVN_PASSDUMP_ALL	diagnostic	`=1` makes `DM_NVN_PASSDUMP` record every draw and binding change, not only the first per pass and stage, including copies and inline uniform updates
@@ -251,11 +255,15 @@ DM_OODLE_HOST	path	The Mac host binary that `shader_split.py` runs in its Oodle 
 DM_OODLE_JOB	path	`=<job file>`: the host runs the game's own Oodle decoder on every record of the job file right before `nnMain`, writes `<job file>.out` and exits (Unreal shader archives)
 DM_OODLE_MODULES	path	The rewritten modules the Mac host's Oodle tool mode loads when `shader_split.py` decodes Trinity packs; set by the NSP script
 DM_OODLE_SERVE	switch	`=1`: the host answers decode requests on stdin / stdout with the game's own Oodle (or LZ5) decoder from the guest main thread before the SDK starts, until stdin ends
+DM_OOZ_LIB	path	`=<library>` (tools) `dm/tools/ue3_astc.py` decodes Oodle chunks with that library's `Kraken_Decompress` instead of the game's own decoder in the Mac host: development on a machine without the host
 DM_OPMODE	player	The operation mode the game sees: `0` handheld, `1` console (default: the profile's `op_mode`, console unless set); read once at startup
 DM_PAD_IDENTICAL	switch	`0` stops reading identical pads here when GameController lists fewer of their model than IOKit has, such as two Pro Controllers over USB (each a player of its own: a Pro Controller from its report 0x30, another model from its HID elements; `pad_hid_mac.h`, `pad_pro.h`); `DM_HID_PADS=0` stops it too; Mac only
 DM_PAD_MERGE	switch	`=1` merges every controller into player 1, as before, instead of giving each controller a player of its own (Mac and iOS)
 DM_PAD_PRESS_TO_JOIN	player	`1`: a controller is no player until one of its buttons is pressed, then it is the lowest player free, whatever its port, link or model, identical pads included (`front_mac.m`, `DmGamepad.m`, `pad_slots.h`); not with `DM_PAD_MERGE`. Launcher setting
+DM_PANEL	player	`0` keeps the diagnostic panel closed when a monitor takes the picture; `1` (default) shows it on the phone then (`front_ios.m` `diag_auto`); the in-game menu's Diagnostics opens it either way
 DM_PATCH_FRONT	switch	`=<bytes>`: the size of the patch area right before the module base for a long text (`BIG_TEXT`); set only by the rewriter's own rerun with the size it needs
+DM_PERF_EXPORT	diagnostic	`=<base path>` writes the session's performance record as `<base>.csv` and `<base>.json` when the host ends (`dm/host/hle_perf.c`); `DM_PERF_INFO=<JSON object>` goes into the JSON as `info`
+DM_PERF_INFO	diagnostic	`=<JSON object>` goes into `DM_PERF_EXPORT`'s JSON as `info` (the device and the settings, which a front end knows)
 DM_PHONE_MOTION	switch	On iOS, whether the phone's own device motion drives player 1's six-axis sensor: `auto` (default) while no controller supplies fresh motion, `1` phone only, `0` never; each source keeps its own orientation
 DM_PICTURE_FIT	player	`fill` scales the 16:9 picture on the iPhone and iPad until it covers the screen in landscape and crops the edges (a portrait or tabletop split and a TV stay fitted); `fit` or unset, the largest 16:9 rectangle with black bars. Launcher and in-game menu setting
 DM_PREEMPT	switch	`0` / `1` overrides the profile's `core_preempt`: also check already-runnable higher-priority peers on the caller's core after every thread SVC
@@ -387,8 +395,15 @@ DM_THR	diagnostic	`=1` logs each SVC (except `SleepThread`) with its first four 
 DM_THRCPU	diagnostic	`=<tsv path>[,<seconds>]` writes each thread's CPU time (100% = one core) and the total every interval (default 10 s); on iOS a relative path is under `Documents`
 DM_TOUCH_HAPTICS	player	`0` turns off the light haptic tap when a touch control is pressed (on by default); launcher setting
 DM_TOUCH_LOG	diagnostic	`=1` logs each touch-screen read with touch points (sample, finger, position, attributes) and each gesture entry, up to 500 lines
+DM_TV_WIDTH	player	the widest the picture is drawn on a TV or monitor, in pixels: `1920` (default), `2560`, `3840`, `0` the display's own; the display is asked for its 16:9 mode of that width (`front_ios.m` `tv_pick_mode`)
 DM_T_DUMP	test	`tests/t_blend_zero.m` prints the red channel each draw stored, row by row
 DM_UDC_SELFTEST	diagnostic	`=1` runs a start-up check of DontCare load and store on private depth-stencil and RGBA8 textures (clear, Load + DontCare, read back) and logs one result line
+DM_UE3_DUMP	diagnostic	`1` logs every Unreal Engine 3 system setting with its value at frames 1 and 600 (`dm/host/hle_ue3set.c`)
+DM_UE3_DYNRES	player	`game` leaves the game's dynamic resolution on, `off` holds `AllowDynamicResolution` at 0 (`hle_ue3set.c`); for a profile with `ue3_settings on`
+DM_UE3_DYNRES_MIN	player	`0.5` to `1.0`: the lowest scale the game's dynamic resolution may go to (`MinimumScreenScale`, `hle_ue3set.c`)
+DM_UE3_PKG_KEY	path	(tools) the game's package key as 64 hex digits, for `dm/tools/ue3_astc.py` to read an Unreal Engine 3 game's package tables; never in the repository
+DM_UE3_SCALE	player	`0.5` to `1.0`: below 1 the 3D picture is held at that fraction (`ScreenPercentage`) and the game's dynamic resolution is off; `1.0` leaves both to the game (`hle_ue3set.c`)
+DM_UE3_SET	switch	`=Name=value,Name=value` Unreal Engine 3 system settings the host holds at those values (`hle_ue3set.c`: found by the engine's own table, any row by name); `DM_UE3S_<Name>=<value>` is the same for one setting
 DM_UE_SHADERS	path	Folder of the Unreal shader code archives decoded by `uepak.py`, for `shader_split.py` (default `ue_shaders` beside the RomFS); needed when the RomFS has Unreal paks
 DM_UE_TEXTURE_POOL	switch	Megabytes Unreal's texture streaming pool (`r.Streaming.PoolSize`) is raised to, overriding the profile's `ue_texture_pool`; `0` keeps the game's own pool. On iOS only this switch turns it on (`Documents/env.txt`)
 DM_UPSCALER	player	`metalfx` draws the game's own upscaler shaders (agl's NDSR network, found by the shader map) with MetalFX's spatial scaler; `game` (the default) runs them
@@ -406,3 +421,5 @@ DM_XCODE_PROJECT_DIR	path	Folder of the per-game Xcode project that `build_ipa.s
 DM_XV_FILE	path	File where the attachment validity ledger keeps the keys it disabled after a violation, read at the next launch
 DM_YIELD_BACKOFF	switch	`0` turns off the yield back-off; `=<cap µs>[:<start µs>]` sets its sleep cap and the run of yields after which it starts (default 250:2000)
 DM_YIELD_CLOCK	diagnostic	Clock-reading yield loops: 0 uses ordinary yield backoff, 1 backs off from the start, 2 also sleeps to the predicted end (default)
+NX_FORCE_ASTC_ONLY	diagnostic	`1` makes a GPU that has BC texture formats behave as one that has not: BC1 to BC3 textures are uploaded as ASTC from `DM_BCSUB_PACK`, the rest decoded (`nvn_mtl.m` `bcs_pf`), so the path an A16 iPhone takes runs on a Mac and in the Simulator
+NX_MEMORY_BUDGET_MB	diagnostic	`=<MiB>` ends the run with exit code 86 and a `[RED]` line when what iOS counts against the app (`phys_footprint`; plus Metal's allocated size on the null GPU) passes it (`dm/host/memstat.m`)
