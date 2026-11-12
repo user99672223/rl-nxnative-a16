@@ -7,6 +7,7 @@
 #   Environment: GAME=game profile (dm/games/<base game title ID>, or one in DM_GAMES_DIR; required), W=the game's work folder (required: <NSP folder>/<title ID>-work, never the home folder), PATCHED / ROMFS / MSL_IOS can each be overridden
 #   DM_COPY_ROMFS=NO leaves the game files (RomFS) out of the IPA, as it does for the Xcode build phase: the package then stays small (a large game's full package can exceed what iOS extracts), and the app takes the files from Documents/romfs.img (scripts/push_romfs.sh); default: they are packed
 #   DM_SHADER_FILES=1 packs an NVN game's shader library as its separate files, msl/b-<chain>/, not as the one file b-<chain>.img, for install tools that cannot copy a large file (AltServer; pack_ipa.py --shader-files); default: off
+#   DM_BCSUB_PACK_FILE=<bc_astc.pack> puts the ASTC stand-ins of the game's BC textures into the app as dm/bc_astc.pack, for a GPU without BC texture formats (dm/tools/ue3_astc.py)
 #   DM_ENTITLEMENTS=<plist> is the unsigned IPA's entitlements, signed ad-hoc into the executable (default: Increased Memory Limit; an empty string = none)
 #   AOC=add-on content directory (default $W/data/aoc; when it exists it goes to DmIOS.app/aoc/<index>/; an empty string = none), GFXAPI=nvn / vulkan (default: by the shader libraries in MSL_IOS)
 #   The app name is the game name in the base NSP's control data ($W/data/v0/control.nacp, else the one next to the RomFS), the app version is the display version in the packed game's control data (the one next to the RomFS:
@@ -259,6 +260,8 @@ if [ "${DM_COPY_ROMFS:-YES}" = NO ]; then
 elif [ -f "$ROMFS" ]; then MAPS=("$P/romfs.img=$ROMFS"); else MAPS=("$P/romfs=$ROMFS"); fi
 if [ -n "$AOC" ] && [ -d "$AOC" ]; then MAPS+=("$P/aoc=$AOC"); t "add-on content: $(ls "$AOC" | tr '\n' ' ')"; fi
 if [ -n "${PSO:-}" ]; then MAPS+=("$P/pso=$PSO"); fi
+# The ASTC stand-ins of the game's BC textures, for a GPU without BC formats (an A16 iPhone; dm/tools/ue3_astc.py makes the pack, main.m hands it to the host as DM_BCSUB_PACK)
+if [ -n "${DM_BCSUB_PACK_FILE:-}" ]; then [ -f "$DM_BCSUB_PACK_FILE" ] || die "DM_BCSUB_PACK_FILE: no $DM_BCSUB_PACK_FILE"; MAPS+=("$P/dm/bc_astc.pack=$DM_BCSUB_PACK_FILE"); t "ASTC texture pack: $DM_BCSUB_PACK_FILE ($(du -h "$DM_BCSUB_PACK_FILE" | cut -f1))"; fi
 MAPS+=("$P/msl/$MSLDIR=$MSL_IOS/$MSLDIR" "$P=$APP")
   if [ -d "$(dirname "$ROMFS")/html" ]; then MAPS+=("$P/html=$(dirname "$ROMFS")/html"); t "offline HTML pages: $(dirname "$ROMFS")/html"; fi   # beside its RomFS, where the host finds them (hle_web.c)
   if [ -d "$(dirname "$ROMFS")/jit" ]; then MAPS+=("$P/jit=$(dirname "$ROMFS")/jit"); t "nn::jit image: $(dirname "$ROMFS")/jit"; fi

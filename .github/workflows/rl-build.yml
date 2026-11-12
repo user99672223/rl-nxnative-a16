@@ -96,6 +96,8 @@ jobs:
           PLATFORM: ${{ inputs.platform }}
           EXTRA: ${{ inputs.extra }}
         run: |
+          # the ASTC stand-ins of the BC textures go into an iPhone app when an earlier run (or the step below) made them
+          pack=$(ls "$RL_GAME_DIR"/*_build/bc_astc.pack 2>/dev/null | head -1); if [ "$PLATFORM" = ios ] && [ -s "${pack:-}" ]; then export DM_BCSUB_PACK_FILE="$pack"; echo "the app gets the ASTC texture pack"; fi
           # shellcheck disable=SC2086
           scripts/rl/ci_step.sh build python scripts/build_ipa_from_nsp.py "$RL_GAME_DIR" -k "$RL_KEYS" --platform "$PLATFORM" --progress lines $EXTRA
       - name: Run
@@ -111,6 +113,16 @@ jobs:
           rc=0
           for s in ${RUN_SCRIPT//,/ }; do scripts/rl/ci_step.sh "run-${s%.sh}" bash "scripts/rl/ci_runs/$s" || rc=$?; done
           exit $rc
+      - name: Pack the iPhone app again with the ASTC texture pack made above
+        if: inputs.platform == 'ios' && contains(inputs.run_script, 'astc_pack.sh')
+        continue-on-error: true
+        env:
+          EXTRA: ${{ inputs.extra }}
+        run: |
+          pack=$(ls "$RL_GAME_DIR"/*_build/bc_astc.pack 2>/dev/null | head -1); [ -s "${pack:-}" ] || { echo "no pack was made"; exit 1; }
+          export DM_BCSUB_PACK_FILE="$pack"
+          # shellcheck disable=SC2086
+          scripts/rl/ci_step.sh build2 python scripts/build_ipa_from_nsp.py "$RL_GAME_DIR" -k "$RL_KEYS" --platform ios --progress lines $EXTRA
       - name: Archive the build for the cache (encrypted)
         if: always()
         run: scripts/rl/ci_cache.sh save
@@ -128,6 +140,15 @@ jobs:
           mkdir -p "$RL_OUT/build-logs" && cp -R "$RL_GAME_DIR"/*_build/logs/. "$RL_OUT/build-logs/" 2>/dev/null || true
           ( cd "$RL_GAME_DIR" 2>/dev/null && { du -sh ./* ./*_build/* 2>/dev/null; df -h /; } ) > "$RL_OUT/logs/sizes.txt" 2>&1 || true
           scripts/rl/ci_pack_out.sh "rl-${{ inputs.platform }}-${{ github.run_number }}"
+          # The unsigned IPA: encrypted to the owner's key straight into 1.9 GB parts (scripts/fetch_ipa.sh joins and decrypts them), the plain file deleted first where disk is short
+          ipa=$(ls "$RL_GAME_DIR"/*.ipa 2>/dev/null | head -1)
+          if [ -n "$ipa" ]; then
+            rm -rf "$RL_GAME_DIR"/*_build/shader "$RL_GAME_DIR"/*_build/extract "$RL_GAME_DIR"/game.nsp "$RL_CACHE_DIR"   # the cache is saved already; room for the encrypted copy
+            ( cd "$(dirname "$ipa")" && shasum -a 256 "$(basename "$ipa")" | cut -d' ' -f1 > "$RL_UPLOAD/ipa.sha256.txt.plain" )
+            age -r "$(cat scripts/rl/recipient.txt)" -o "$RL_UPLOAD/ipa.sha256.age" "$RL_UPLOAD/ipa.sha256.txt.plain" && rm -f "$RL_UPLOAD/ipa.sha256.txt.plain"
+            age -r "$(cat scripts/rl/recipient.txt)" < "$ipa" | split -b 1900m - "$RL_UPLOAD/RocketLeague.ipa.age.part"
+            rm -f "$ipa"; echo "encrypted IPA: $(ls "$RL_UPLOAD" | grep -c ipa.age.part) part(s), $(du -sh "$RL_UPLOAD" | cut -f1)"
+          fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

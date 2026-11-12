@@ -21,7 +21,7 @@ shader_versions	v0
 # every module main imports from
 modules	main sdk
 romfs_marker	tagame/cookednnx/textures6.tfc
-zip_store	.bin:.bmp:.bnk:.tfc:.upk:.wem:.xxx:.metallib
+zip_store	.bin:.bmp:.bnk:.tfc:.upk:.wem:.xxx:.metallib:.pack
 
 # ---- Memory ----
 # The packing script's guess from the survey, not measured yet: main sets a heap of at most the pool − 64 MB, a 3,328 MB heap region; the NPDM declares no system resource
