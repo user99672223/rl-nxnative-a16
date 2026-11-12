@@ -21,7 +21,7 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include "sha256.h"
+#include "../../gfx/tex/dm_sha256.h"
 
 struct Level { uint32_t w, h; std::vector<uint8_t> data; };
 struct Job { uint8_t kind, mode; std::vector<Level> lv; };

@@ -1,4 +1,4 @@
-// SHA-256 for bc2astc (the host uses CommonCrypto for the same digest). Written for this tool; FIPS 180-4.
+// SHA-256 (FIPS 180-4), written for this project: the ASTC pack's level keys in dm/tools/bc_astc/bc2astc.cpp, and in nvn_bcsub.c where CommonCrypto is not at hand (tests off Apple platforms).
 #pragma once
 #include <stdint.h>
 #include <string.h>
