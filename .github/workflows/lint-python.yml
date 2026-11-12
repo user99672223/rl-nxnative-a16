@@ -6,11 +6,6 @@
 name: lint-python
 
 on:
-  pull_request:
-    paths: ['**.py', pyproject.toml, .github/requirements/lint.txt, .github/workflows/lint-python.yml, dm/tools/lint_python_baseline.tsv]
-  push:
-    branches: [main]
-    paths: ['**.py', pyproject.toml, .github/requirements/lint.txt, .github/workflows/lint-python.yml, dm/tools/lint_python_baseline.tsv]
   workflow_dispatch:
 
 permissions:

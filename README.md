@@ -1,5 +1,11 @@
 # nxnative
 
+> **This fork: Rocket League (Switch, base 1.0) on a base iPhone 15 (A16).**
+> Work in progress; see [PROGRESS.md](PROGRESS.md). This repository contains **no game data, no keys and
+> no firmware**, and none are distributed through it: you need your own legally obtained copy of the game
+> and your own console keys. Everything here builds on [seedds/nxnative](https://github.com/seedds/nxnative)
+> (MIT); third-party code keeps its own licenses ([dm/third_party](dm/third_party/README.md)).
+
 Play your own Nintendo Switch and Switch 2 games natively on Apple silicon Macs, iPhone and iPad. One script packs your game into a Mac app or an unsigned IPA that you sideload.
 
 It is not an emulator: the game's own code runs directly on the Apple chip, with Switch graphics rebuilt on Metal. Nothing from any game is in this repository, and the project is not affiliated with Nintendo or any game publisher.
