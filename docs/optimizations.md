@@ -20,6 +20,9 @@ Addresses are offsets into the 1.0 `main` (build `becfed979bb4204fbd0945cd450fb2
 | 8 | Native render resolution (the engine's `ResX` / `ResY`) | Render resolution (`DM_UE3_RES`) | game's own (720p) until measured | built, run pending |
 | 9 | The engine's frame-rate smoothing held flat | Frame-rate smoothing (`DM_UE3_SMOOTH`) | steady | built, run pending |
 | 10 | Frame rate 30 / 60 by the present interval | Frame rate (`DM_FPS_TARGET`) | 60 | built |
+| 11 | Fences no longer end the render pass | `DM_NVN_FENCE_CUT` (1 = as before) | on | measured: menu 38 → 29 passes, 241 → 138 MB |
+| 12 | Unreal's mid-frame command-buffer kicks dropped | Render pass merging (`DM_UE3_KICK`) | game's own | measured: with 11, 26 passes, 112 MB |
+| 13 | Render-target pool sized by the render resolution | follows Render resolution | – | needed for 8; measured: 1440p boots |
 
 (The table grows as the benchmark gives numbers; entries below are complete only where they say "measured".)
 
@@ -82,3 +85,31 @@ Addresses are offsets into the 1.0 `main` (build `becfed979bb4204fbd0945cd450fb2
 **Found.** The game asks NVN for present interval 1 and steps by the time that passed; the physics runs fixed 120 Hz steps inside each tick (`PhysicsFramerate=120`, `MaxPhysicsSubsteps=5`), so the game's speed is right at any frame rate down to 24 fps.
 
 **Changed.** Profile keys `fps_target 60` and `present_interval display`: the player's Frame rate (30 or 60) is applied as the present interval alone. No "unlocked": an iPhone 15's DisplayPort output is 60 Hz, and the engine's ceiling is 62.
+
+## 11. Fences that ended the render pass
+
+**Found.** A menu frame was 38 render passes for 143 draws; its last 11 draws, the UI, were 11 passes on the same 1280x720 target, each loading and storing all of it. Per frame the game calls `nvnCommandBufferFenceSync` 17 times: Scaleform's render sync puts a fence after each batch it draws, to know when its vertex memory is free again (`main+0xa94988`, behind the thunks at `main+0xa2c408`), and the occlusion queries fence as well (`main+0xa988fc`). The host's queue layer made each fence a step of its own between two Metal command buffers, and a command buffer's end is a render pass's end. Evidence: the op-by-op pass dump of run 43183630282 (each UI draw followed by the list's end and nothing else), the call counts of a frame.
+
+**Changed.** `dm/gfx/nvn/nvn_queue.inc`: a fence among commands stays inside their command buffer; its sync is published with that command buffer's fence when it is committed. The sync never passes earlier than the game asked, only at the end of the commands it sits among. `DM_NVN_FENCE_CUT=1` restores the cut. This is general host behaviour, not a patch of the game.
+
+**Measured (null GPU, menu, 720p).** 38 → 29 passes, 241 → 138 MB of attachments loaded and stored a frame.
+
+**Risk.** A game that fences in the middle of a list, submits it and then waits for the sync gets it when the whole list's command buffer is done instead of part-way: later, never wrong.
+
+## 12. Unreal's mid-frame kicks
+
+**Found.** `RHIKickCommandBuffer` (`main+0xa95968`) ends the command list, submits it and flushes the queue without waiting; the scene renderer calls it between phases and after post-process steps (probe run 43171792130: 14 submissions a frame). Each ends the open pass.
+
+**Changed.** A rewriter stub (`dm/games/01005EE0036EC000/patches.py` `kick_gate`) returns from the kick at once while a flag is set; the flag is a system setting no code reads, held by the host. Setting Render pass merging (`DM_UE3_KICK`: Game's own / Merged).
+
+**Measured.** With item 11: 29 → 26 passes, 138 → 112 MB. One submission a frame instead of 14.
+
+**Risk.** The GPU starts on the frame when the frame's list is complete rather than during it. Default is the game's own until the merged frame has been seen on a real GPU.
+
+## 13. Render-target pool
+
+**Found.** The RHI makes its render targets in a fixed pool of 286 MB (`main+0xab4698`), enough for 1280x720. At 2560x1440 the pool runs out and the game faults on the null storage (`main+0xa9ca88`, run 43172097281).
+
+**Changed.** Stub `target_pool`: the pool is 286 MB at the game's size, 656 MB above 1280 across, 1,152 MB above 1920 across, read from the held `ResX` when the pool is made.
+
+**Measured.** 2560x1440 boots and runs; peak memory 2,511 MiB against 2,354 MiB at 720p (the pool is address space until targets are made in it).

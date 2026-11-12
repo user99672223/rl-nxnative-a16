@@ -185,6 +185,28 @@ Read this first in every session. Newest status at the top of each section.
 - ASTC-only at the menu: 200 s, clean exit, 12 textures not in the pack (CPU-decoded: 64x64 ones, one 640x640, two
   1024x1024 with 11 levels): to look at.
 
+### What split the UI into one pass a draw, and the fix (2026-11-12 ~11:30 local)
+
+- Not a per-frame "BlockUntilGPUIdle" (probe of `main+0x27ae74`: 0 hits in normal frames; that reading was wrong).
+- The op trace (`DM_NVN_PASSDUMP_ALL`, run 43183630282) shows each UI draw followed by the end of its command buffer with
+  no record between. Per frame the game calls `nvnCommandBufferFenceSync` 17 times: Scaleform's render sync (thunks at
+  `main+0xa2c408..0xa2c438`: kick, is-fence-done, wait-fence `main+0xa94a00`, new-fence `main+0xa94988`) fences after
+  every batch it draws; the occlusion queries fence too (`main+0xa988fc`, `main+0xa98a9c`). `SyncWait` 16 a frame are
+  polls with timeout 0. `nvn_queue.inc` made every fence a node of its own = a Metal command buffer = a pass end.
+- **Fix (host, general):** a fence among commands stays in their node and is published at its commit
+  (`nq_record_one`, `struct nq_fence`); `DM_NVN_FENCE_CUT=1` cuts as before.
+
+| run | menu frame, 720p | passes | load+store MB |
+|---|---|---|---|
+| 43173025823 | before | 38 | 241 |
+| 43187034962 | fences inline | 29 | 138 |
+| 43187053178 | fences inline + `DM_UE3_KICK=merge` | 26 | 112 |
+| 43187070052 | the same + `DM_NVN_TBDR=1` | 29 | 127 |
+
+  (`DM_NVN_TBDR=1` turns the waiting-clear path off, `lc_on`, which is why it has more passes here.)
+- Input: the game does read the presses (probe of its pad object, run 43189985782: buttons 0x1 / 0x2 / 0x400 while A /
+  B / Plus are held, on the one connected pad), and still shows nothing new after "PressAnyButtonToStart". Open.
+
 ## CI loops (all manual-dispatch or push to main; logs with game data are encrypted)
 
 | What | How | Time |
