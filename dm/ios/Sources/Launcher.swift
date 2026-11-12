@@ -133,7 +133,9 @@ private struct LauncherView: View {
                     } footer: {
                         Text("Brings back all settings this game was tested with.")
                     }
-                    CloudSavesSection()
+                    // An app built to stay offline (Info.plist DMOfflineOnly: Rocket League's port, whose rule is that nothing leaves the phone) offers no cloud-save folder:
+                    // the folder would be one iCloud Drive syncs
+                    if !((Bundle.main.object(forInfoDictionaryKey: "DMOfflineOnly") as? Bool) ?? false) { CloudSavesSection() }
                     Section {
                         HStack {
                             Text("Memory available")

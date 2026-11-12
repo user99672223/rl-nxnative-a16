@@ -46,6 +46,8 @@ VNACP=${CONTROL:-$VNACP}   # from here on, the file that lists the game's langua
 export LC_ALL=C DM_BUNDLE_ID=${DM_BUNDLE_ID:-org.nxnative.$(echo "$GAME" | tr 'A-Z' 'a-z')} DM_DISPLAY_NAME DM_APP_VERSION DM_APP_CATEGORY=$(gp app_category) DM_TEAM_ID=${DM_TEAM_ID:-0000000000}   # placeholder identity: unsigned, the install tool replaces it
 if [ "${DM_SHOW_FPS:-0}" = 1 ]; then export DM_SHOW_FPS=YES; else export DM_SHOW_FPS=NO; fi
 export DM_LANG=${DM_LANG:-en-US}
+# offline_only on (Rocket League's port): the launcher offers no cloud-save folder, which would be one iCloud Drive syncs; main.m also ignores a saved one
+if [ "$(python3 "$DM/games/game.py" "$GAME" offline_only off)" = on ]; then export DM_OFFLINE_ONLY=YES; else export DM_OFFLINE_ONLY=NO; fi
 if [ "$PREPARE_XCODE" = YES ]; then
   IOS=${DM_XCODE_PROJECT_DIR:-$W/xcode}
   mkdir -p "$IOS" || die "mkdir $IOS"

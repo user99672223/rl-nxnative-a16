@@ -33,6 +33,10 @@ app_pool	0xCD500000
 sys_resource	0x0
 mem_used	0x5200000
 
+# ---- Offline ----
+# Nothing leaves the device: the host has no network at all (every service answers "no connection"), and with this key the launcher offers no cloud-save folder either
+offline_only	on
+
 # ---- Settings ----
 # The engine's system settings are held from the host for the player's Render scale and Dynamic resolution (dm/host/hle_ue3set.c; the table is found in main at run time)
 ue3_settings	on

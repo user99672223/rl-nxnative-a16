@@ -65,6 +65,8 @@ void dm_clear_cloud_saves(void) {
 }
 
 void dm_cloud_saves_env(void) {
+    // An app built to stay offline (Info.plist DMOfflineOnly, the profile's offline_only): no save folder outside the app, whatever was picked or set before
+    if ([[NSBundle.mainBundle objectForInfoDictionaryKey:@"DMOfflineOnly"] boolValue]) { if (getenv("DM_SAVE_SYNC")) { unsetenv("DM_SAVE_SYNC"); fprintf(stderr, "boot: offline-only app: DM_SAVE_SYNC ignored, saves stay in the app\n"); } return; }
     static BOOL fromPick;   // DM_SAVE_SYNC is the one this set, not an env file's
     if (getenv("DM_SAVE_SYNC") && !fromPick) return;
     BOOL stale = NO;
