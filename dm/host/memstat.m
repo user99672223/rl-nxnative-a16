@@ -153,3 +153,64 @@ __attribute__((constructor)) static void thrcpu_start(void) {
 #endif
     pthread_t th; pthread_create(&th, NULL, thrcpu_thread, spec); pthread_detach(th);
 }
+
+// ---------- The memory budget: NX_MEMORY_BUDGET_MB=<MiB> (common to Mac / iOS) ----------
+// A base iPhone 15 has 6 GB, of which an app with the Increased Memory Limit entitlement gets about 4 GB before iOS ends it; a Mac or the Simulator has no such limit, so a game that
+// would be killed on the phone runs there without a word. With the switch set, a watcher samples what iOS counts against the limit four times a second (phys_footprint, TASK_VM_INFO),
+// keeps the peak, logs it every 10 s and on every new 64 MiB of peak, and ends the run with a [RED] line and exit code 86 the moment the figure passes the budget. Without the
+// switch only the figures are kept (dm_mem_now), for the diagnostic panel.
+// On the null GPU (nvn_null.h) no texture or render target is ever written, so their pages are never touched and the footprint leaves them out: there the figure adds the Metal
+// device's currentAllocatedSize, which counts every texture at its full size (an upper bound: buffers the game did touch are in both).
+#include <stdatomic.h>
+#include <unistd.h>
+static int g_nvn_null;   // as nvn_mtl.m decides it: DM_NVN_NULL asked for and the device has no Metal 4 (set in mb_thread; this file is also built without the graphics layer)
+static _Atomic uint64_t g_mb_now, g_mb_peak, g_mb_metal, g_mb_avail; static uint64_t g_mb_budget; static _Atomic int g_mb_started;
+static uint64_t mb_sample(id<MTLDevice> dev) {
+    task_vm_info_data_t vi; mach_msg_type_number_t n = TASK_VM_INFO_COUNT;
+    uint64_t fp = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vi, &n) == KERN_SUCCESS ? vi.phys_footprint : 0;
+    uint64_t metal = dev.currentAllocatedSize, v = fp + (g_nvn_null ? metal : 0);
+#if TARGET_OS_IPHONE
+    atomic_store(&g_mb_avail, (uint64_t)os_proc_available_memory());
+#endif
+    atomic_store(&g_mb_now, v); atomic_store(&g_mb_metal, metal);
+    uint64_t pk = atomic_load(&g_mb_peak); while (v > pk && !atomic_compare_exchange_weak(&g_mb_peak, &pk, v)) {}
+    return v;
+}
+static void *mb_thread(void *p) {
+    (void)p; pthread_setname_np("dm.mem-budget");
+    id<MTLDevice> dev = MTLCreateSystemDefaultDevice();
+    { const char *e = getenv("DM_NVN_NULL"); g_nvn_null = e && atoi(e) > 0 && dev && ![dev supportsFamily:MTLGPUFamilyMetal4]; }
+    uint64_t logged_peak = 0; int tick = 0;
+    for (;; tick++) {
+        uint64_t v = mb_sample(dev), pk = atomic_load(&g_mb_peak);
+        if (g_mb_budget && v > g_mb_budget) {
+            LOG("[RED] NX_MEMORY_BUDGET_MB exceeded: %llu MiB in use, budget %llu MiB (Metal allocated %llu MiB%s); on the phone iOS would end the app here. Ending the run (exit 86)",
+                (unsigned long long)(v >> 20), (unsigned long long)(g_mb_budget >> 20), (unsigned long long)(atomic_load(&g_mb_metal) >> 20), g_nvn_null ? ", counted in on the null GPU" : "");
+            fflush(NULL); _exit(86);
+        }
+        if (g_mb_budget && (pk >= logged_peak + (64ull << 20) || tick % 40 == 0)) {
+            if (pk >= logged_peak + (64ull << 20)) logged_peak = pk;
+            LOG("memory budget: %llu MiB in use, peak %llu of %llu MiB (Metal allocated %llu MiB)", (unsigned long long)(v >> 20), (unsigned long long)(pk >> 20),
+                (unsigned long long)(g_mb_budget >> 20), (unsigned long long)(atomic_load(&g_mb_metal) >> 20));
+        }
+        usleep(250000);
+    }
+    return NULL;
+}
+// Starts the watcher once; called at load (the Mac's environment) and again by a front end after it has set the switches of its settings and env file (iOS)
+void dm_mem_budget_start(void) {
+    const char *e = getenv("NX_MEMORY_BUDGET_MB"); long mb = e ? atol(e) : 0;
+    if (mb > 0) g_mb_budget = (uint64_t)mb << 20;
+    if (atomic_exchange(&g_mb_started, 1)) return;
+    if (mb > 0) LOG("memory budget: NX_MEMORY_BUDGET_MB=%ld, the run ends when the footprint passes it", mb);
+    pthread_t th; pthread_create(&th, NULL, mb_thread, NULL); pthread_detach(th);
+}
+// For the diagnostic panel: bytes in use, the peak, the budget (0 = none), what iOS says is left (0 off iOS) and Metal's allocated size
+void dm_mem_now(uint64_t *use, uint64_t *peak, uint64_t *budget, uint64_t *avail, uint64_t *metal) {
+    if (use) *use = atomic_load(&g_mb_now);
+    if (peak) *peak = atomic_load(&g_mb_peak);
+    if (budget) *budget = g_mb_budget;
+    if (avail) *avail = atomic_load(&g_mb_avail);
+    if (metal) *metal = atomic_load(&g_mb_metal);
+}
+__attribute__((constructor)) static void mb_start(void) { if (getenv("NX_MEMORY_BUDGET_MB")) dm_mem_budget_start(); }
