@@ -18,10 +18,15 @@ static struct { double t_s; uint64_t row; char text[96]; } g_mark[PERF_MARKS]; s
 static uint64_t g_t0;
 
 __attribute__((weak)) int dm_thermal_now(void);
-void dm_mem_now(uint64_t *use, uint64_t *peak, uint64_t *budget, uint64_t *avail, uint64_t *metal);
-__attribute__((weak)) void dm_mem_now(uint64_t *use, uint64_t *peak, uint64_t *budget, uint64_t *avail, uint64_t *metal) { if (use) *use = 0; if (peak) *peak = 0; if (budget) *budget = 0; if (avail) *avail = 0; if (metal) *metal = 0; }
-// What the graphics layer renders and shows (nvn_mtl.m); 0 x 0 before the first frame and in builds without it
-__attribute__((weak)) void mtl_perf_sizes(uint32_t *rw, uint32_t *rh, uint32_t *ow, uint32_t *oh) { *rw = *rh = *ow = *oh = 0; }
+// Weak references, not weak definitions: on the iPhone build the weak definitions that stood here were the ones called (every row of the first device log had 0 MiB and
+// a 0 x 0 render size), although memstat.m and nvn_mtl.m were linked. A build without them (unit tests) leaves the addresses null
+__attribute__((weak)) void dm_mem_now(uint64_t *use, uint64_t *peak, uint64_t *budget, uint64_t *avail, uint64_t *metal);
+__attribute__((weak)) void mtl_perf_sizes(uint32_t *rw, uint32_t *rh, uint32_t *ow, uint32_t *oh);   // what the graphics layer renders and shows (nvn_mtl.m); 0 x 0 before the first frame
+static void perf_mem(uint64_t *use, uint64_t *peak, uint64_t *budget, uint64_t *avail, uint64_t *metal) {
+    uint64_t z[5] = {0}; if (dm_mem_now) dm_mem_now(&z[0], &z[1], &z[2], &z[3], &z[4]);
+    if (use) *use = z[0]; if (peak) *peak = z[1]; if (budget) *budget = z[2]; if (avail) *avail = z[3]; if (metal) *metal = z[4];
+}
+static void perf_sizes(uint32_t *rw, uint32_t *rh, uint32_t *ow, uint32_t *oh) { *rw = *rh = *ow = *oh = 0; if (mtl_perf_sizes) mtl_perf_sizes(rw, rh, ow, oh); }
 
 static dm_perf_row *row_at(uint64_t i) { return i < PERF_MAX_ROWS && g_chunk[i / PERF_CHUNK] ? &g_chunk[i / PERF_CHUNK][i % PERF_CHUNK] : NULL; }
 
@@ -37,8 +42,8 @@ void dm_perf_frame(uint64_t frame, double frame_ms, double work_ms, unsigned pas
     uint64_t i = atomic_load(&g_rows); if (i >= PERF_MAX_ROWS) return;
     if (!g_have_first) { g_first_frame = frame; g_have_first = 1; }
     if (!g_chunk[i / PERF_CHUNK]) { dm_perf_row *c = calloc(PERF_CHUNK, sizeof *c); if (!c) return; pthread_mutex_lock(&g_perf_mu); g_chunk[i / PERF_CHUNK] = c; pthread_mutex_unlock(&g_perf_mu); }
-    dm_perf_row *r = row_at(i); uint64_t use = 0; dm_mem_now(&use, NULL, NULL, NULL, NULL);
-    uint32_t rw, rh, ow, oh; mtl_perf_sizes(&rw, &rh, &ow, &oh);
+    dm_perf_row *r = row_at(i); uint64_t use = 0; perf_mem(&use, NULL, NULL, NULL, NULL);
+    uint32_t rw, rh, ow, oh; perf_sizes(&rw, &rh, &ow, &oh);
     r->frame = (uint32_t)frame; r->t_s = (float)((now_ns() - g_t0) / 1e9); r->frame_ms = (float)frame_ms; r->cpu_ms = (float)work_ms; r->gpu_ms = -1;
     r->passes = (uint16_t)(passes > 65535 ? 65535 : passes); r->draws = (uint16_t)(draws > 65535 ? 65535 : draws);
     r->rt_mb = (float)(rt_load_mb + rt_store_mb); r->pso_new = (uint8_t)(pso_new > 255 ? 255 : pso_new);
@@ -84,7 +89,7 @@ void dm_perf_now(dm_perf_sum *s) {
     uint64_t n = atomic_load(&g_rows), from = n; double ms = 0;
     while (from > 0 && ms < 1000.0 && n - from < 600) { from--; ms += row_at(from)->frame_ms; }
     dm_perf_window(from, n, s);
-    uint32_t rw, rh, ow, oh; mtl_perf_sizes(&rw, &rh, &ow, &oh); s->out_w = (uint16_t)ow; s->out_h = (uint16_t)oh; if (rw) { s->render_w = (uint16_t)rw; s->render_h = (uint16_t)rh; }
+    uint32_t rw, rh, ow, oh; perf_sizes(&rw, &rh, &ow, &oh); s->out_w = (uint16_t)ow; s->out_h = (uint16_t)oh; if (rw) { s->render_w = (uint16_t)rw; s->render_h = (uint16_t)rh; }
 }
 
 static void json_str(FILE *f, const char *s) { fputc('"', f); for (; s && *s; s++) { if (*s == '"' || *s == '\\') fputc('\\', f); if ((unsigned char)*s >= 0x20) fputc(*s, f); } fputc('"', f); }
@@ -98,7 +103,7 @@ int dm_perf_export(const char *base, const char *info_json) {
         fprintf(f, "%u,%.3f,%.3f,%.3f,%.3f,%u,%u,%.2f,%u,%u,%d,%u,%u\n", r->frame, r->t_s, r->frame_ms, r->cpu_ms, r->gpu_ms, r->draws, r->passes, r->rt_mb, r->pso_new, r->mem_mb, r->thermal, r->render_w, r->render_h); }
     if (fclose(f)) return -1;
     snprintf(p, sizeof p, "%s.json", base); f = fopen(p, "w"); if (!f) return -1;
-    uint64_t use, peak, budget, avail, metal; dm_mem_now(&use, &peak, &budget, &avail, &metal);
+    uint64_t use, peak, budget, avail, metal; perf_mem(&use, &peak, &budget, &avail, &metal);
     fprintf(f, "{\n  \"format\": \"nxnative performance log 1\",\n  \"info\": %s,\n  \"frames\": %llu,\n  \"record_full\": %s,\n", info_json && *info_json ? info_json : "{}", (unsigned long long)n, n >= PERF_MAX_ROWS ? "true" : "false");
     fprintf(f, "  \"memory_mb\": {\"in_use\": %llu, \"peak\": %llu, \"budget\": %llu, \"left_before_limit\": %llu, \"metal_allocated\": %llu},\n", (unsigned long long)(use >> 20), (unsigned long long)(peak >> 20),
             (unsigned long long)(budget >> 20), (unsigned long long)(avail >> 20), (unsigned long long)(metal >> 20));

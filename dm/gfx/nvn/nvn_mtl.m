@@ -2395,7 +2395,10 @@ static void lc_land(void);
 // A submission's CPU-side writes at its end (events, samples-passed and counter reports): run once, by its feedback handler or, when a game's SyncWait wakes on the
 // GPU's own signal of the fence first, by that waiter (DM_NVN_FAST_WAKE, on by default): the feedback handler comes 0.26 ms after the GPU end on an M2 Max
 typedef struct { _Atomic uint64_t fence; _Atomic int claimed; int n; post_op *ops; seg_clk *sc; uint32_t seg_last; uint64_t t_commit; } post_rec;   // t_commit: guest ns when it was committed
-#define POST_RING 128
+// 1024, and a submission whose slot is still taken waits for it (mtl_sub_commit): at 128 with a fatal error, an iPhone 15 ended Rocket League 27 s into its menu
+// ("the writes of fence 42217 never ran"). That game makes about 26 submissions a frame and the phone ran about three frames ahead of the display, so one 35 ms frame put
+// more than 128 of them in flight
+#define POST_RING 1024
 static post_rec g_postr[POST_RING];
 static pthread_mutex_t g_post_mu = PTHREAD_MUTEX_INITIALIZER;
 // A successful claim holds the lock until post_run finishes. Ownership alone
@@ -2483,7 +2486,14 @@ uint64_t mtl_sub_commit(void) {
     cbs_list *cbs = cbs_take(); cbs_fly_put(fence, cbs);
     seg_clk *sc = g_sclk; uint32_t seg_last = g_seg; g_sclk = NULL;
     pthread_mutex_lock(&g_post_mu);
-    if (!atomic_load(&pr->claimed) && pr->fence) MDIE("post ring: the writes of fence %llu never ran", (unsigned long long)pr->fence);
+    for (int waited = 0; !atomic_load(&pr->claimed) && pr->fence; waited++) {   // the submission POST_RING before this one has not been reported back: wait for the GPU, up to 5 s
+        uint64_t old = pr->fence;
+        pthread_mutex_unlock(&g_post_mu);
+        if (waited >= 1000) MDIE("post ring: the writes of fence %llu never ran", (unsigned long long)old);
+        { static _Atomic int said; if (!waited && atomic_fetch_add(&said, 1) < 4) MLOG("post ring: %d submissions are in flight, fence %llu waits for the GPU's report of fence %llu", POST_RING, (unsigned long long)fence, (unsigned long long)old); }
+        pthread_mutex_lock(&g_mu); if (g_done < old) { struct timespec ts = {0, 5000000}; pthread_cond_timedwait_relative_np(&g_cv, &g_mu, &ts); } pthread_mutex_unlock(&g_mu);
+        pthread_mutex_lock(&g_post_mu);
+    }
     pr->n = n; pr->ops = ops; pr->sc = sc; pr->seg_last = seg_last; pr->t_commit = guest_ns(); atomic_store(&pr->claimed, 0); atomic_store(&pr->fence, fence);
     pthread_mutex_unlock(&g_post_mu);
     int lost_test = gpu_lost_test();

@@ -104,7 +104,9 @@ Addresses are offsets into the 1.0 `main` (build `becfed979bb4204fbd0945cd450fb2
 
 **Measured.** With item 11: 29 → 26 passes, 138 → 112 MB. One submission a frame instead of 14. At 2560x1440 with both: 36 → 25 passes, 966 → 424 MB a frame (run 43187087202).
 
-**Risk.** The GPU starts on the frame when the frame's list is complete rather than during it. Default is the game's own until the merged frame has been seen on a real GPU.
+**Risk.** The GPU starts on the frame when the frame's list is complete rather than during it.
+
+**On the iPhone 15 (2026-11-12, build 97a844ad, 1080p, a Free Play match).** Switched on in the in-game menu mid-match: 87 → 76 passes and 2,693 → 2,264 MB of attachments a frame, 38 → 51 fps over the next 35 s, no change in the picture reported. It is now the default; "Game's own" stays in the settings.
 
 ## 13. Render-target pool
 
@@ -113,3 +115,14 @@ Addresses are offsets into the 1.0 `main` (build `becfed979bb4204fbd0945cd450fb2
 **Changed.** Stub `target_pool`: the pool is 286 MB at the game's size, 656 MB above 1280 across, 1,152 MB above 1920 across, read from the held `ResX` when the pool is made.
 
 **Measured.** 2560x1440 boots and runs; peak memory 2,511 MiB against 2,354 MiB at 720p (the pool is address space until targets are made in it).
+
+## 14. The replay thread ran at a third of the clock
+
+**Found (iPhone 15, first device log, `../RL/device/drop1/log.txt`).** In a Free Play match at 1080p the GPU took 12 to 14 ms a frame, inside 16.7 ms, and the frame rate was still 35 to 55. The time went to the host thread that replays the game's NVN commands into Metal (`nq_worker`, `dm/gfx/nvn/nvn_queue.inc`). Its work did not grow: 22 M cycles a frame at the menu and 20 to 25 M in the match. Its clock fell: a mean 3.35 GHz at the menu (6.7 ms of CPU a frame), 1.1 to 1.9 GHz in the match (13 to 20 ms), with the CPU drawing 0.6 W against 1.0 W at the menu. The thread had a user-interactive QoS and no deadline; the thread that acquires the frame declares one (`set_time_constraint_comp`, `hle_nvn.c`) and iOS sets the clock from such declarations.
+
+**Changed.** The replay thread declares a real-time deadline of its own: period one frame, computation the larger of 1.25 x the p90 and 1.1 x the peak of its CPU time a frame over 120 frames, capped at 0.9 x the period (`nq_rt_tick`). `DM_NQ_RT=0` turns it off.
+
+**Expected, not measured yet.** At 3.35 GHz the match's 20 to 25 M cycles are 6 to 7.5 ms, which leaves the GPU's 12 to 14 ms as the limit: 60 fps at 1080p. The next device log's "translation detail" lines (mean clock, CPU ms) say whether it holds.
+
+**Risk.** A real-time thread that runs past its declaration is demoted for tens of milliseconds; the declaration follows the measured peak to avoid it. Two real-time threads and the game's main thread now compete for the A16's two performance cores.
+

@@ -16,7 +16,7 @@
 
 enum { UE3_INT = 2, UE3_FLOAT = 4, UE3_BOOL = 5 };
 #define UE3_MAX 256
-#define DM_UE3_KICK_DEFAULT "game"   // until the merged frame has been seen on a GPU
+#define DM_UE3_KICK_DEFAULT "merge"   // seen on an iPhone 15 (2026-11-12): switched on mid-match, 87 -> 76 passes a frame and 38 -> 51 fps, no change in the picture reported
 #define UE3_IMAGE_MAX ((uint64_t)1 << 30)   // no main with its bss is larger
 typedef struct { char name[48]; int type; uint8_t *var; int held; uint32_t want; uint32_t orig; int have_orig; } ue3_row;
 static ue3_row g_row[UE3_MAX]; static int g_nrow; static pthread_once_t g_once = PTHREAD_ONCE_INIT; static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -243,6 +243,9 @@ static void nx_apply(const char *env, const char *v, int live) {
     } else if (!strcmp(env, "DM_UE3_DYNRES_MIN")) {
         float s = v ? strtof(v, NULL) : 0; if (s >= 0.25f && s <= 1.0f) { char p[16]; snprintf(p, sizeof p, "%g", s); dm_ue3_set("MinimumScreenScale", p); } else dm_ue3_set("MinimumScreenScale", "");
     } else if (!strcmp(env, "DM_UE3_RES")) {
+        // Not while the game runs: its window and render targets were made at the size it started with, and a new ResX / ResY under them draws a part of the picture in a
+        // corner of the old targets (an iPhone 15, the in-game menu's Render resolution changed during a match). The launcher keeps the value for the next start
+        if (live) { LOG("ue3 settings: render resolution %s is for the next start of the game (its targets are made when it starts)", v ? v : "game"); return; }
         // The size the game renders at (its window, viewport and render targets; 1280x720 as shipped): read by the engine when it starts, so a change takes a restart
         unsigned w = 0, h = 0; if (v && sscanf(v, "%ux%u", &w, &h) == 2 && w >= 640 && w <= 3840 && h >= 360 && h <= 2160) { char a[16], b[16]; snprintf(a, sizeof a, "%u", w); snprintf(b, sizeof b, "%u", h); dm_ue3_set("ResX", a); dm_ue3_set("ResY", b); }
         else { dm_ue3_set("ResX", ""); dm_ue3_set("ResY", ""); }

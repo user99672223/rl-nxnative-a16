@@ -216,6 +216,27 @@ trial packs (`pack/`, `astc_eval/`; CI builds its own), the extracted RomFS (`da
 hactool when a local package read is needed; `data/v0/ExeFS` kept for the rewriter), decompressed packages (`dec/`), CI
 results older than the last 12 runs, pip's cache. Kept: the NSP and keys, Ghidra and its project, `elf/`, `survey/`.
 
+## First run on the owner's iPhone 15 (2026-11-12, build 97a844ad, iOS 27.2.1; files in `../RL/device/drop1/`)
+
+The owner's account: first Play crashed, the second reached the menu, Free Play loaded almost at once and played well; setting the monitor output to 1080p or 1440p really switches the monitor's mode; the monitor stays at 60 Hz (its mode list has no rate above 60 at any size); after changing settings during play the picture ended up as a zoomed part of the scene on both screens.
+
+What the two logs and the performance export show:
+
+| Finding | Evidence | Done |
+|---|---|---|
+| The game runs on the A16: ASTC pack in use, menu 60 fps, Free Play playable | `log.txt`, 8,970 frames, peak footprint 2,259 MiB of about 3,970 | - |
+| Crash 27 s into the menu: `FATAL post ring: the writes of fence 42217 never ran` | `log.prev.txt`. About 26 submissions a frame, the phone about 3 frames ahead of the display, one 35 ms frame put more than 128 in flight | ring 1024, a full ring waits for the GPU (`mtl_sub_commit`) |
+| The first-launch crash | its log was overwritten by later launches; the same ring is the likely cause (first launch builds every pipeline, long frames) and is not proven | keep three logs next time if it recurs |
+| Misfit picture | `DM_UE3_RES` changed in the in-game menu at 87 s (to game) and 150 s (to 2560x1440): ResX / ResY were rewritten under targets made at 1920x1080 | the setting applies at the next start only |
+| Matches at 35 to 55 fps with the GPU at 12 to 14 ms | the replay thread's clock: 3.35 GHz at the menu, 1.1 to 1.9 GHz in the match, same cycles a frame (optimizations.md item 14) | real-time declaration for the replay thread (`DM_NQ_RT`) |
+| Pass merging works on a real GPU | switched on at 99 s: 87 → 76 passes, 38 → 51 fps | now the default |
+| A match frame at 1080p: 300 to 440 draws, 65 to 116 passes, 1.8 to 3.4 GB of attachments loaded and stored | perf CSV; this build is from before the inline fences (item 11) | the next build has item 11 |
+| Performance export had 0 MiB and 0 x 0 in every row | the iOS front end never started the memory watcher; the recorder called its own weak fallbacks | watcher started in `main.m`; weak references in `hle_perf.c` |
+| 12 tiny mip levels (2x2, 1x1) of BC textures not in the ASTC pack | `[RED] BC texture level not in the ASTC pack`, drawn as flat blocks | harmless at that size; open |
+| Monitor: 60 Hz only | display modes list, `phone_refresh_hz 60` | the 120 fps path is not needed for this monitor over this cable |
+
+Not measured on the device yet: the inline fences (item 11), the replay thread's deadline (item 14), native 1440p from the start of the game.
+
 ## CI loops (all manual-dispatch or push to main; logs with game data are encrypted)
 
 | What | How | Time |

@@ -110,6 +110,41 @@ static void nq_cost_end(nq_cost c) {
     atomic_fetch_add(&g_sub_instr,ins-c.instr); atomic_fetch_add(&g_cum_sub_instr,ins-c.instr);
     atomic_fetch_add(&g_cum_sub_cyc,cyc-c.cycles); atomic_fetch_add(&g_cum_sub_sys_ns,thr_sys_ns()-c.sys);
 }
+// The replay thread's own real-time declaration (period = a frame, computation = the CPU time it needs for one). With its QoS alone, an iPhone 15 ran it at a mean
+// 1.1 to 1.9 GHz through a Rocket League match against 3.35 GHz at the menu: the same 22 M cycles a frame took 13 to 20 ms of CPU instead of 6.7, the frame followed at
+// 35 to 55 fps with the GPU at 13 ms, and the CPU drew 0.6 W against 1.0 W at 60 fps in the menu. The performance controller sets a thread's clock from a declared
+// deadline (set_time_constraint_comp, hle_nvn.c, does it for the thread that acquires); this thread, the heaviest of the frame, had none.
+// Sized like that one: every 120 frames the larger of 1.25 x the p90 and 1.1 x the peak of its CPU time a frame, capped at 0.9 x the period, re-declared on a 15 % change.
+// DM_NQ_RT=0 leaves it on its QoS; =1 turns it on off the iPhone too (default: iPhone and iPad only, since the CI Mac's virtual cores have no clock to raise)
+static int dcmp(const void *a, const void *b);
+static int nq_rt_on(void) {
+    static int v=-1; if(v<0) { const char *e=getenv("DM_NQ_RT");
+#if TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR
+        v=!(e && !strcmp(e,"0"));
+#else
+        v=e && !strcmp(e,"1");
+#endif
+    }
+    return v;
+}
+static void nq_rt_declare(uint64_t period_ns,double comp_ms) {
+    static mach_timebase_info_data_t tb; if(!tb.denom) mach_timebase_info(&tb);
+    uint64_t comp_ns=(uint64_t)(comp_ms*1e6);
+    thread_time_constraint_policy_data_t p={.period=(uint32_t)(period_ns*tb.denom/tb.numer),.computation=(uint32_t)(comp_ns*tb.denom/tb.numer),.constraint=(uint32_t)(period_ns*tb.denom/tb.numer),.preemptible=1};
+    kern_return_t kr=thread_policy_set(pthread_mach_thread_np(pthread_self()),THREAD_TIME_CONSTRAINT_POLICY,(thread_policy_t)&p,THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+    LOG("[nvn] replay thread time-constraint policy (period %.3f ms, computation %.3f ms) %s (DM_NQ_RT)",period_ns/1e6,comp_ms,kr==KERN_SUCCESS?"set":"failed to set");
+}
+static void nq_rt_tick(void) {   // once a frame, after its present
+    if(!nq_rt_on()) return;
+    static uint64_t last, period; static double win[120], declared; static int n;
+    uint64_t c=clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID), p=(uint64_t)(1e9/mtl_fps_target());
+    if(!last || p!=period) { last=c; period=p; n=0; if(!declared) declared=p*0.6/1e6; nq_rt_declare(p,declared); return; }
+    win[n++]=(double)(c-last)/1e6; last=c;
+    if(n<120) return;
+    double v[120]; memcpy(v,win,sizeof v); qsort(v,120,sizeof *v,dcmp); n=0;
+    double comp=fmax(v[107]*1.25,v[119]*1.1), cap=p*0.9/1e6; if(comp>cap) comp=cap; if(comp<1) comp=1;
+    if(comp>declared*1.15 || comp<declared*0.85) { declared=comp; nq_rt_declare(p,comp); }
+}
 static void *nq_worker(void *unused) {
     (void)unused; pthread_setname_np("NVN queue replay");
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE,0);
@@ -180,6 +215,7 @@ static void *nq_worker(void *unused) {
                 present=mtl_present(&n->texture,n->period,n->crop,&copy); mtl_tex_unpin(n->texture.serial);
             }
             nq_cost_end(cost); gfx_leave(); objc_autoreleasePoolPop(pool); pthread_mutex_unlock(&g_sub_mu);
+            if(n->kind==NQ_PRESENT) nq_rt_tick();
         }
         pthread_mutex_lock(&nq_mu); if(n->kind==NQ_PRESENT) { q->present=present; q->copy=copy; j->receipt->present=present; j->receipt->copy=copy; } if(fence) { q->physical=fence; for(unsigned i=0;i<n->signal_count;i++) nq_event_issued(n->signals[i].event,fence,n->signals[i].mode,n->signals[i].value); } for(unsigned i=0;i<n->fence_count;i++) { nq_publish(n->fences[i].receipt,q->physical); nq_put(n->fences[i].receipt); } free(n->fences); if(n->receipt) nq_put(n->receipt); free(n->signals); free(n->bytes); free(n); pthread_cond_broadcast(&nq_cv); pthread_mutex_unlock(&nq_mu);
     }
