@@ -25,6 +25,8 @@ if [ -z "$run" ]; then
 fi
 [ -n "$run" ] || { echo "no finished run with an iPhone build artifact (rl-enc-ios-*) was found in $REPO" >&2; exit 1; }
 tmp="$out/.fetch-$run"; rm -rf "$tmp"; mkdir -p "$tmp"
+# gh keeps the artifact's zip in the temporary folder while it downloads: several GB, and /tmp is often memory (tmpfs). It goes beside the output instead
+export TMPDIR="$tmp"
 echo "downloading the encrypted artifact of run $run ..."
 "$GH" run download "$run" -R "$REPO" -D "$tmp" -p 'rl-enc-ios-*'
 parts=$(find "$tmp" -name 'RocketLeague.ipa.age.part*' | sort)
