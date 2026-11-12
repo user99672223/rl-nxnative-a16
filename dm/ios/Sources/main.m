@@ -110,6 +110,9 @@ const char *front_ios_device_check(void) {
     if (done++) return msg[0] ? msg : NULL;
     id<MTLDevice> gpu = MTLCreateSystemDefaultDevice();   // the system default device, the one the graphics layers take (mtl_init repeats this check for the other routes)
     if (gpu.supportsBCTextureCompression) return NULL;
+    // A GPU without BC formats runs a game packed with its BC textures re-encoded as ASTC (dm/bc_astc.pack, made by dm/tools/ue3_astc.py; nvn_mtl.m takes it through
+    // DM_BCSUB_PACK, set at boot below): an A16 iPhone, the device Rocket League's port is for
+    if (getenv("DM_BCSUB_PACK")) { fprintf(stderr, "boot: this GPU (%s) has no BC texture formats; the app's ASTC pack stands in for them\n", gpu ? gpu.name.UTF8String : "no Metal device"); return NULL; }
     snprintf(msg, sizeof msg, "This device's GPU (%s) cannot read BC-compressed textures, which the games use. It needs an iPhone 15 Pro or newer (A17 Pro chip or later) or an iPad with an M1 chip or later.",
              gpu ? gpu.name.UTF8String : "no Metal device");
     fprintf(stderr, "[RED] boot: %s\n", msg);
@@ -183,6 +186,11 @@ static int boot_env(void) {
     aoc_locate();   // add-on content: Documents/aoc, else <App>/aoc; an empty Documents/aoc explicitly selects no DLC
     NSString *pso = [res stringByAppendingPathComponent:@"pso"];   // the pipeline archive made offline (build_ipa.sh, dm/gfx/tools/pso_offline.py): the shader pairs' bases, which the device then does not build
     if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);
+    {   // the ASTC stand-ins of the game's BC textures, for a GPU without BC formats and for NX_FORCE_ASTC_ONLY (nvn_mtl.m bcs_pf): in the app, or put into Documents beside the log
+        NSString *pack = [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"bc_astc.pack"], *docpack = [doc stringByAppendingPathComponent:@"bc_astc.pack"];
+        if ([fm fileExistsAtPath:docpack]) setenv("DM_BCSUB_PACK", docpack.fileSystemRepresentation, 0);
+        else if ([fm fileExistsAtPath:pack]) setenv("DM_BCSUB_PACK", pack.fileSystemRepresentation, 0);
+    }
     chdir(doc.fileSystemRepresentation);
     g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation); g_argc = 2;
     dm_host_preload_start(g_argc, g_argv);   // Module tables / relocation / takeover run early in the background, in parallel with UIKit startup (and the launcher: the settings it sets are read when the game starts)
