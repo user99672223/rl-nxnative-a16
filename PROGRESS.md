@@ -53,6 +53,14 @@ Read this first in every session. Newest status at the top of each section.
   analysis notes below. Benchmark route not written yet.
 - **Phase 5**: not started.
 
+### Boot log (null GPU)
+
+- Run 43153001707 (first boot): reached `nnMain`, NVN device (API 53.313, depth near=0, origin upper left), window
+  1280x720 format 0x25 with present interval 1, a 520 MB memory pool, AudioOut 6 channels, HID; heap 3.13 GB. Stopped at
+  `account::GetUserId` of a never-opened handle (the game asks per player slot before opening: `main+0xaa495c`) → host fixed
+  to fail such a call instead of dying (`hle_account.c`).
+- Encrypted build cache works: 12 GB build folder (8.8 GB of it Mac shader libraries) → 1.7 GB archive in the Actions cache.
+
 ## CI loops (all manual-dispatch or push to main; logs with game data are encrypted)
 
 | What | How | Time |
