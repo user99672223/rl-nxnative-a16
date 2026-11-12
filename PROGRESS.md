@@ -118,6 +118,11 @@ Addresses are offsets into the 1.0 `main` (build `becfed97…`). Decompiled text
   `1 / [this+0x198]`. So physics steps at 120 Hz whatever the frame rate, up to 5 steps a frame: gameplay speed is right
   at any frame rate of 24 fps or more (5 / 120 s = 41.7 ms a frame at most), and a 30 or 60 fps cap changes only how many
   steps a frame takes (4 or 2).
+- **Engine frame smoothing** (class defaults of `Engine` in `engine.xxx`; the encrypted config may override them):
+  `bSmoothFrameRate = true`, `MaxSmoothedFrameRate = 62`, `MinSmoothedFrameRate = 22`: the limiter at `main+0xae6154`
+  asks `GetMaxTickRate`, which with smoothing caps the tick near the measured rate within 22..62 fps. So the engine itself
+  never runs past 62 fps; a 30 fps cap has to come from the present interval (the host's `present_interval display` +
+  `DM_FPS_TARGET`), not from this limiter.
 - **Stats text** "Docked %3.2f fps" / "Undocked %3.2f fps": `main+0x413e64`.
 - Texture formats in the cooked data (36,710 unique mips): DXT1 0.98 GB, DXT5 1.38 GB (5,094 mips of DXT5 normal maps
   `TC_NormalmapSwizzle`: x/y in alpha/green), A8R8G8B8 0.94 GB, G8, V8U8. No BC4/5/6/7. Mips are stored pre-swizzled
