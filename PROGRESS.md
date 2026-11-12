@@ -123,6 +123,16 @@ Addresses are offsets into the 1.0 `main` (build `becfed97…`). Decompiled text
   asks `GetMaxTickRate`, which with smoothing caps the tick near the measured rate within 22..62 fps. So the engine itself
   never runs past 62 fps; a 30 fps cap has to come from the present interval (the host's `present_interval display` +
   `DM_FPS_TARGET`), not from this limiter.
+- **Ways into a match without menus** (leads for the benchmark; from `tagame.xxx`'s names and `main`'s strings): `main`
+  imports `nn::os::GetHostArgc/Argv` and holds "open stadium_p?Listen", "GameTags=%s"; the script has game modes
+  `GameInfo_Soccar_TA`, `GameInfo_BotPerfTest_TA`, `GameInfo_PerfTest_TA` and tags `BotsEasy/Medium/Hard/Unfair/None`,
+  `UnlimitedTime`. The host passes a command line after `--` (`dmhost <modules> -- <args>`, or the profile's `game_args`),
+  so an Unreal map URL such as `Stadium_P?Game=TAGame.GameInfo_Soccar_TA?GameTags=BotsMedium` may start a bot match
+  directly: to be tried (workflow input `game_args`).
+- **First-boot screens to expect** (script names): EULA / ToS / privacy (`bHasAcceptedEULA`, `ShowPrivacyModal`), a start
+  menu (`GFxData_StartMenu_TA`, `EventTitleScreenClicked`), a tutorial prompt (`GFxModal_Tutorial_TA`), then the main
+  menu (`GFxData_MainMenu_TA`); menus load their own packages (`gfx_startmenu_sf.xxx`, `gfx_mainmenu_sf.xxx`,
+  `gfx_privatematchmenu_sf.xxx`, ...), so `DM_FS=1` shows which menu is up.
 - **Stats text** "Docked %3.2f fps" / "Undocked %3.2f fps": `main+0x413e64`.
 - Texture formats in the cooked data (36,710 unique mips): DXT1 0.98 GB, DXT5 1.38 GB (5,094 mips of DXT5 normal maps
   `TC_NormalmapSwizzle`: x/y in alpha/green), A8R8G8B8 0.94 GB, G8, V8U8. No BC4/5/6/7. Mips are stored pre-swizzled
