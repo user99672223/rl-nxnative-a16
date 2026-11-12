@@ -2405,7 +2405,9 @@ static void post_run(post_rec *r, uint64_t c0, uint64_t c1) {
             if (ops[i].mode == VIS_ZERO) { g_vis_acc = 0; continue; }
             vis_list *l = ops[i].vis;
             for (int k = 0; k < l->n; k++) { g_vis_acc += ((const uint64_t *)((__bridge id<MTLBuffer>)l->s[k].buf).contents)[l->s[k].slot]; CFRelease(l->s[k].buf); }
-            free(l); if (ops[i].mode == VIS_REPORT) { uint64_t rec[2] = {g_vis_acc, gpu_ticks()}; memcpy((void *)ops[i].addr, rec, sizeof rec); }
+            free(l);
+            // The null GPU runs no draw, so every slot reads 0 and a game that culls by occlusion queries (Unreal Engine 3) would stop drawing what it tests: report it visible
+            if (ops[i].mode == VIS_REPORT) { uint64_t rec[2] = {g_nvn_null ? 4096 : g_vis_acc, gpu_ticks()}; memcpy((void *)ops[i].addr, rec, sizeof rec); }
         }
         else { uint64_t t = rep_ticks(&ops[i], sc, seg_last, c0, c1), rec[2] = {(ops[i].type == 0 || ops[i].type == 0x10) && !DM_GAME_RENDER_COND ? t : 0, t}; memcpy((void *)ops[i].addr, rec, sizeof rec); }   // render_cond: a timestamp report's counter field is 0, as on the GPU (see rc_value)
     }
