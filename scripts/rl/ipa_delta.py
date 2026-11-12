@@ -5,6 +5,9 @@ so a build also publishes everything else (the executable and the small files, a
   ipa_delta.py make  <new.ipa> <delta.zip>            CI: the small entries and manifest.json (name, size, CRC of every entry)
   ipa_delta.py apply <old.ipa> <delta.zip> <new.ipa>  laptop: the new IPA from the one already here; fails if a large file differs (then fetch the whole IPA)
 
+  ipa_delta.py slim  <old.ipa> <delta.zip> <slim.ipa> laptop: an IPA of the update alone, for a phone whose installed full build already keeps the large files
+                                                      in its Documents (dm/ios/Sources/main.m data_seed); fails like apply if a large file differs
+
 Large = 256 MiB or more. Large entries are copied as they are packed (no recompression), so applying takes about as long as copying the file."""
 import json, shutil, struct, sys, zipfile
 
@@ -59,6 +62,21 @@ def apply(old, delta, new):
     if bad or len(got) != len(man): raise SystemExit(f'the assembled IPA does not match the build: {bad[:5]}')
     print(f'{new}: {len(man)} entries, matches the build')
 
+def slim(old, delta, new):
+    zo, zd = zipfile.ZipFile(old), zipfile.ZipFile(delta)
+    man = json.loads(zd.read('manifest.json')); have = {i.filename: i for i in zo.infolist()}
+    for m in man:
+        i = have.get(m['name'])
+        if m['big'] and (not i or i.file_size != m['size'] or i.CRC != m['crc']):
+            raise SystemExit(f'{m["name"]} changed in this build: a slim install would not find it on the phone, fetch and install the whole IPA (scripts/fetch_ipa.sh <run>)')
+    with zipfile.ZipFile(new, 'w') as o:
+        for m in man:
+            if m['big']: continue
+            i = zd.getinfo(m['name'])
+            with zd.open(i) as f: o.writestr(i, f.read(), compress_type=zipfile.ZIP_DEFLATED if i.file_size else zipfile.ZIP_STORED)
+    print(f'{new}: {sum(1 for m in man if not m["big"])} entries, without {", ".join(m["name"].split("/")[-1] for m in man if m["big"])}')
+
 if len(sys.argv) >= 4 and sys.argv[1] == 'make': make(sys.argv[2], sys.argv[3])
 elif len(sys.argv) >= 5 and sys.argv[1] == 'apply': apply(sys.argv[2], sys.argv[3], sys.argv[4])
+elif len(sys.argv) >= 5 and sys.argv[1] == 'slim': slim(sys.argv[2], sys.argv[3], sys.argv[4])
 else: sys.exit(__doc__)

@@ -53,6 +53,34 @@ static NSArray<NSString *> *romfs_document_images(NSString *doc) {
     }];
     return imgs;
 }
+// The app's three large data files (the game's file system image, the ASTC texture pack, the shader library: 6.2 of the IPA's 6.2 GB) also kept in Documents, so that a later
+// build can be installed as a slim IPA of about 40 MB without them (scripts/fetch_ipa.sh --slim): iOS takes only a whole app at an install, and they do not change from build
+// to build. A full build makes them at each start as APFS clones of its own files: no time and no storage beyond the app's, and the blocks stay when a slim build replaces
+// the app. A file of another size in Documents is from an older full build and is replaced. Never a plain copy (8.7 GB at a launch); a clone that fails is logged and the
+// full build runs from its own files as before. Kept out of device backups
+#include <sys/clonefile.h>
+#include <errno.h>
+static void data_seed_one(NSString *src, NSString *dst) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSDictionary *sa = [fm attributesOfItemAtPath:src error:nil], *da = [fm attributesOfItemAtPath:dst error:nil];
+    if (!sa || sa.fileSize < (64u << 20)) return;
+    if (da && da.fileSize == sa.fileSize) return;
+    [fm createDirectoryAtPath:dst.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *tmp = [dst stringByAppendingString:@".seed"]; [fm removeItemAtPath:tmp error:nil];
+    if (clonefile(src.fileSystemRepresentation, tmp.fileSystemRepresentation, 0)) { fprintf(stderr, "boot: %s could not be kept in Documents (clonefile: %s); slim updates need it there\n", src.lastPathComponent.UTF8String, strerror(errno)); return; }
+    [fm removeItemAtPath:dst error:nil];
+    if (![fm moveItemAtPath:tmp toPath:dst error:nil]) { [fm removeItemAtPath:tmp error:nil]; return; }
+    [[NSURL fileURLWithPath:dst] setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
+    fprintf(stderr, "boot: %s kept in Documents for slim updates (%.0f MB, a clone)\n", dst.lastPathComponent.UTF8String, sa.fileSize / 1048576.0);
+}
+static void data_seed(NSString *doc, NSString *res) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    if ([fm fileExistsAtPath:[res stringByAppendingPathComponent:@"romfs.id"]] || [fm fileExistsAtPath:[[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"programs.txt"]]) return;   // upstream's own slim build, and games of several programs: as they were
+    data_seed_one([res stringByAppendingPathComponent:@"romfs.img"], [doc stringByAppendingPathComponent:@"romfs.img"]);
+    data_seed_one([[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"bc_astc.pack"], [doc stringByAppendingPathComponent:@"bc_astc.pack"]);
+    NSString *msl = [res stringByAppendingPathComponent:@"msl"];
+    for (NSString *n in [fm contentsOfDirectoryAtPath:msl error:nil]) if ([n hasSuffix:@".img"]) data_seed_one([msl stringByAppendingPathComponent:n], [[doc stringByAppendingPathComponent:@"msl"] stringByAppendingPathComponent:n]);
+}
 static NSString *romfs_locate(NSString *prog) {   // prog: a game of several programs, the running program's folder in the app (p<N>); nil otherwise
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
@@ -180,6 +208,7 @@ static int boot_env(void) {
     NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
     if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
     fprintf(stderr, "boot: game language %s\n", getenv("DM_LANG") ?: "en-US");
+    data_seed(doc, res);
     NSString *dm = program_env();
     if (!dm) { romfs_identity_report(doc); fprintf(stderr, "boot: game files not found (Documents/romfs.img, Documents/romfs or <App>/romfs)\n"); return 0; }
     setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);
@@ -225,6 +254,11 @@ static NSString *program_env(void) {
         dmdir = [dmdir stringByAppendingPathComponent:prog]; msl = [msl stringByAppendingPathComponent:prog];
         setenv("DM_APP_DM", dmdir.fileSystemRepresentation, 1);   // the launcher's settings (Launcher.swift)
         fprintf(stderr, "boot: program %d of %s (%zu bytes of launch parameter)\n", n, [[plist stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] stringByReplacingOccurrencesOfString:@"\n" withString:@" "].UTF8String, d.length > 4 ? (size_t)d.length - 4 : 0);
+    }
+    if (!prog && ![fm contentsOfDirectoryAtPath:msl error:nil].count) {   // a slim build: the shader library a full build kept in Documents (data_seed)
+        NSString *dmsl = [doc stringByAppendingPathComponent:@"msl"];
+        if ([fm contentsOfDirectoryAtPath:dmsl error:nil].count) { msl = dmsl; fprintf(stderr, "boot: shader library from Documents/msl (slim build)\n"); }
+        else fprintf(stderr, "[RED] boot: this is a slim build and Documents has no shader library: install a full build once and start it\n");
     }
     NSString *romfs = romfs_locate(prog);
     if (!romfs) return nil;
