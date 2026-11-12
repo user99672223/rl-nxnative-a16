@@ -104,6 +104,32 @@ Read this first in every session. Newest status at the top of each section.
 - In flight: 43166521864 (1440p, A presses), 43166579317 (map URL on the command line:
   `Stadium_P?Game=TAGame.GameInfo_Soccar_TA?GameTags=BotsMedium`), iOS build 43161430713.
 
+### Findings of the 06:15–07:00 runs (2026-11-12)
+
+- Game log through `DM_PROBE=main:0xe2b5c` (run 43166761524): engine initialised, menu level `gameinfo_gfxmenu_sf` loaded,
+  "Initial startup" at 6.5 s; Npad 0 constructed "Connected" in style 1 (the others disconnected); `SaveData/Update` and
+  `Metrics/RecordMetrics` end in `OSCS_NoNetworkConnection` (offline, as wanted). Only 41 log calls in 150 s.
+- The game builds its command line from `nn::os::GetHostArgv` (main thread function `main+0xab0e60`) and hands it to the
+  engine's pre-init, so `ResX=` / `ResY=` and a map URL can be given with `game_args`. A map URL alone did not visibly
+  load a match (run 43166579317: same memory and draw rates as the menu); not understood yet.
+- 40 A presses change neither draws nor passes per second: whether the menu reacts is still unknown.
+- **Menu frame, 720p** (perf export + `DM_NVN_PASSDUMP`, run 43169272803): 143 draws, 38 passes, 241 MB of attachments
+  loaded + stored a frame (190 MB with `DM_NVN_TBDR=1`: stores of unwritten attachments skipped; pass count unchanged).
+  The frame: 4 clear-only passes, shadow depth 512x512 ↔ scene colour+depth alternation (4 scene passes reloading
+  both), 12 quarter-size bloom passes at 322x182, then **11 consecutive one-draw passes on the same 1280x720 target, each
+  loading and storing it**. The pass dump's lookahead says each of those draws is alone in its command list: the game
+  submits and flushes after each (`main+0xa9505c`, callers under investigation with a probe, run 43171792130).
+  At 1440p those 11 passes alone are 11 x 2 x 14.7 MB = 324 MB a frame. Candidates: cut the game's flushes there, or
+  keep a pass open across submissions in the host.
+- The presents counted per second (25–35) vary from run to run on the CI Macs with ~45 % of one core in use, so they
+  are not a measure of the game; the earlier reading "smoothing ratchets to 26 fps" is unproven (the smoothing hold
+  logged nothing; diagnostics added).
+- Null GPU flake: "post ring: the writes of fence N never ran" (run 43169258435): the stand-in's reports lagged 128
+  commits behind. Fixed with backpressure in `nvn_null.m` (a commit waits while 16 reports are outstanding).
+- ASTC pack step in CI linked the x86 astcenc library of a universal build; fixed (`astc_pack.sh`), rerun 43169181751.
+  Without a pack, `NX_FORCE_ASTC_ONLY=1` ran 200 s on the CPU-decode fallback, peak 2,498 MiB.
+- iOS build 43161430713 finished (success); `scripts/fetch_ipa.sh` verification running.
+
 ## CI loops (all manual-dispatch or push to main; logs with game data are encrypted)
 
 | What | How | Time |
