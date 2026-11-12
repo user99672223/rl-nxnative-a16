@@ -2657,6 +2657,19 @@ static MTLPixelFormat bcs_view_pf(id<MTLTexture> base, MTLPixelFormat want) {
         default: return base.pixelFormat;   // BC4 / BC5 decoded (R8, RG8) have no sRGB form
     }
 }
+// The format of an sRGB / linear twin of a BC texture that shares its storage (tex_mtl_): the block size the storage's texture b was uploaded with, in the sRGB-ness the twin's
+// own format want has (want comes from the twin's descriptor, whose block size is only the one remembered for its serial)
+static int pf_srgb(MTLPixelFormat f) { return f == MTLPixelFormatASTC_4x4_sRGB || f == MTLPixelFormatASTC_5x5_sRGB || f == MTLPixelFormatASTC_6x6_sRGB || f == MTLPixelFormatRGBA8Unorm_sRGB; }
+static MTLPixelFormat bcs_twin_pf(id<MTLTexture> b, MTLPixelFormat want) {
+    int srgb = pf_srgb(want);
+    switch (b.pixelFormat) {
+        case MTLPixelFormatASTC_4x4_LDR: case MTLPixelFormatASTC_4x4_sRGB: return srgb ? MTLPixelFormatASTC_4x4_sRGB : MTLPixelFormatASTC_4x4_LDR;
+        case MTLPixelFormatASTC_5x5_LDR: case MTLPixelFormatASTC_5x5_sRGB: return srgb ? MTLPixelFormatASTC_5x5_sRGB : MTLPixelFormatASTC_5x5_LDR;
+        case MTLPixelFormatASTC_6x6_LDR: case MTLPixelFormatASTC_6x6_sRGB: return srgb ? MTLPixelFormatASTC_6x6_sRGB : MTLPixelFormatASTC_6x6_LDR;
+        case MTLPixelFormatRGBA8Unorm: case MTLPixelFormatRGBA8Unorm_sRGB: return srgb ? MTLPixelFormatRGBA8Unorm_sRGB : MTLPixelFormatRGBA8Unorm;
+        default: return want;
+    }
+}
 void mtl_bcsub_stats(uint64_t *hit, uint64_t *miss, uint64_t *decoded, uint64_t *bc_bytes, uint64_t *out_bytes) {
     *hit = atomic_load(&g_bcs_hit); *miss = atomic_load(&g_bcs_miss); *decoded = atomic_load(&g_bcs_decoded); *bc_bytes = atomic_load(&g_bcs_bytes_bc); *out_bytes = atomic_load(&g_bcs_bytes_out);
 }
@@ -4755,6 +4768,7 @@ static id<MTLTexture> tex_mtl_(const tex_t *ct) {
             if (!b) continue;
             MTLTextureDescriptor *d = tex_desc(t, 0);
             if (!d || d.sampleCount > 1 || (d.textureType != MTLTextureType2D && d.textureType != MTLTextureType2DArray)) break;
+            if (g_bcsub && nvn_bcsub_kind(t->d.format, NULL, NULL)) d.pixelFormat = bcs_twin_pf(b, d.pixelFormat);   // the twin of a BC texture made as something else: of the block size its storage's texture was uploaded with
             if (b.pixelFormat == d.pixelFormat || tex_need_pfv(b.pixelFormat, d.pixelFormat) || b.textureType != d.textureType) continue;
             v = [b newTextureViewWithPixelFormat:d.pixelFormat textureType:b.textureType levels:NSMakeRange(0, b.mipmapLevelCount) slices:NSMakeRange(0, b.arrayLength) swizzle:b.swizzle];
             if (!v) continue;
