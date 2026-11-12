@@ -31,7 +31,7 @@ static int u32_text(const module_t *m, uint64_t p, char *out, int cap) {
 static int row_at(const module_t *m, const uint8_t *e, ue3_row *r) {
     uint32_t type; uint64_t name, var, help, zero; memcpy(&type, e, 4); memcpy(&name, e + 8, 8); memcpy(&var, e + 0x10, 8); memcpy(&help, e + 0x20, 8); memcpy(&zero, e + 0x28, 8);
     char h[8];
-    if ((type != UE3_INT && type != UE3_FLOAT && type != UE3_BOOL) || zero) return 0;
+    if ((type != UE3_INT && type != UE3_FLOAT && type != UE3_BOOL) || zero > 0xff) return 0;   // the last field is 0 in the file and a small flag once the engine has read its config (1 in Rocket League 1.0)
     if (var < (uint64_t)m->base || var + 4 > (uint64_t)m->base + UE3_IMAGE_MAX || (var & 3)) return 0;   // the variables are in main's bss, past the file's own bytes
     if (u32_text(m, name, r->name, sizeof r->name) < 3) return 0;
     if (help && !(help >= (uint64_t)m->base && help < (uint64_t)m->base + m->size)) return 0;
