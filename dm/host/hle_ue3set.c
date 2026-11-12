@@ -165,6 +165,28 @@ static void ue3_smooth_tick(void) {
         if (!said++) LOG("ue3 settings: frame-rate smoothing held flat at the game's maximum, %g fps (its minimum was %g; DM_UE3_SMOOTH=game leaves it)", mx, mn);
     } else if (!on && have_orig && mn == mx) { memcpy((uint8_t *)eng + k_smooth[row].min, &orig, 4); have_orig = 0; said = 0; }
 }
+// DM_UE3_NAMES=<file> (diagnostic): Unreal's name table (FName index → text) written to the file every 600 presented frames, so the FName indices a probe prints (a
+// UFunction's name at +0x48, a key, a delegate) can be read. GNames is a TArray<FNameEntry*> at a fixed offset of the build; an entry holds index << 1 | wide at +8 and its text
+// at +0x18 (ANSI, or UTF-32 when wide)
+static void ue3_names_dump(void) {
+    static const struct { const char *build; uint64_t names; } k_names[] = { { "becfed979bb4204fbd0945cd450fb296", 0x2d99d80 } };
+    const char *path = getenv("DM_UE3_NAMES"); if (!path || !*path) return;
+    const module_t *m = NULL; uint64_t off = 0;
+    for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main")) m = &g_mod[i];
+    for (int i = 0; m && i < (int)(sizeof k_names / sizeof k_names[0]); i++) if (!strcmp(m->build_id, k_names[i].build)) off = k_names[i].names;
+    if (!off) return;
+    uint64_t data; int32_t n; memcpy(&data, m->base + off, 8); memcpy(&n, m->base + off + 8, 4);
+    if (data < 0x10000 || n <= 0 || n > 4000000) return;
+    FILE *f = fopen(path, "w"); if (!f) return;
+    for (int32_t i = 0; i < n; i++) {
+        uint64_t e; memcpy(&e, (void *)(data + 8ull * i), 8); if (e < 0x10000) continue;
+        uint32_t fl; memcpy(&fl, (void *)(e + 8), 4); char t[200]; int k = 0;
+        if (fl & 1) { const uint32_t *w = (const uint32_t *)(e + 0x18); while (k < 199 && w[k]) { t[k] = w[k] >= 0x20 && w[k] < 0x7f ? (char)w[k] : '?'; k++; } }
+        else { const char *c = (const char *)(e + 0x18); while (k < 199 && c[k]) { t[k] = c[k] >= 0x20 && c[k] < 0x7f ? c[k] : '?'; k++; } }
+        t[k] = 0; fprintf(f, "%d\t%s\n", i, t);
+    }
+    fclose(f);
+}
 static void ue3_tick(int present) {
     static int inited; static uint64_t frame; static int dump = -1;
     frame += present;
@@ -181,6 +203,7 @@ static void ue3_tick(int present) {
         { void dm_nx_settings_start(void); extern char **environ; for (char **q = environ; *q; q++) if (!strncmp(*q, "DM_UE3_", 7) || !strncmp(*q, "DM_UE3S_", 8)) { dm_nx_settings_start(); break; } }
     }
     if (present) ue3_smooth_tick();
+    if (present && frame % 600 == 300) ue3_names_dump();
     if (dump && !present) dm_ue3_dump("device initialisation");
     if (dump && present && (frame == 1 || frame == 600)) dm_ue3_dump(frame == 1 ? "first frame" : "frame 600");
     if (!atomic_load(&g_any_held)) return;

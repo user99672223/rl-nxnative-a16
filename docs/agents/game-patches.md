@@ -79,7 +79,7 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 | [Ori and the Will of the Wisps](#ori-and-the-will-of-the-wisps) | 0 | 0 | 10 | 0 | 0 | `build` → `engine` |
 | [Paper Mario: The Thousand-Year Door](#paper-mario-the-thousand-year-door) | 1 | 0 | 1 | 0 | 0 | `build` → `game` |
 | [Pokémon Legends: Arceus](#pokémon-legends-arceus) | 0 | 0 | 0 | 1 | 0 | `game` |
-| [Rocket League](#rocket-league) | 0 | 0 | 2 | 0 | 2 | `build` → `game`, `build` → `engine` ×3 |
+| [Rocket League](#rocket-league) | 0 | 0 | 2 | 0 | 3 | `build` → `game`, `build` → `engine` ×3 |
 | [Super Mario 3D All-Stars: Super Mario Sunshine](#super-mario-3d-all-stars-super-mario-sunshine) | 2 | 0 | 0 | 0 | 0 | `build` → `game` |
 | [Super Smash Bros. Ultimate](#super-smash-bros-ultimate) | 11 | 0 | 0 | 1 | 0 | `game` |
 | [Taiko Risshiden V DX](#taiko-risshiden-v-dx) | 1 | 0 | 0 | 2 | 0 | `game` |
@@ -477,7 +477,8 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
   - stub `+0xa95968`: RHIKickCommandBuffer returns at once while the host's flag is set (the frame's passes stay open across the renderer's kicks)
   - stub `+0xab4698`: the render-target pool's size follows the held ResX (286 MB at 720p, 656 MB above it, 1,152 MB above 1080p)
   - host [hle_ue3set.c:138](../../dm/host/hle_ue3set.c#L138): Unreal Engine 3's frame-rate smoothing held flat
-  - host [hle_ue3set.c:204](../../dm/host/hle_ue3set.c#L204): build check
+  - host [hle_ue3set.c:172](../../dm/host/hle_ue3set.c#L172): k_names
+  - host [hle_ue3set.c:231](../../dm/host/hle_ue3set.c#L231): build check
 
 ### Super Mario 3D All-Stars: Super Mario Sunshine
 
