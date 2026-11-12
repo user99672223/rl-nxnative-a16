@@ -19,6 +19,8 @@ const uint8_t *nvn_bcsub_find(const uint8_t key[16], int b, uint32_t *len);
 // CPU decode of a level's linear blocks: BC1 / BC2 / BC3 to RGBA8 (4 bytes a texel), BC4 to R8 (1), BC5 to RG8 (2); rows of w texels, h rows. sign: BC4 / BC5 signed
 // (out is then signed bytes). Returns the bytes per texel written, 0 for a kind it does not decode (BC6H, BC7)
 int nvn_bcsub_decode(int kind, int sign, uint32_t w, uint32_t h, const void *blocks, uint8_t *out);
+// A level the pack lacks, for an ASTC texture: a flat-colour ASTC block (the mean of its texels) per b x b block of the decoded level rgba; out takes ceil(w / b) * ceil(h / b) * 16 bytes
+void nvn_bcsub_void_blocks(const uint8_t *rgba, uint32_t w, uint32_t h, int b, uint8_t *out);
 // Counters for the log and the diagnostic panel
 typedef struct { uint64_t hit, miss, hit_bytes, miss_bytes, key_ns; } nvn_bcsub_stats;
 extern nvn_bcsub_stats g_bcsub_stats;

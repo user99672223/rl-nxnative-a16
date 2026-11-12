@@ -110,3 +110,18 @@ int nvn_bcsub_decode(int kind, int sign, uint32_t w, uint32_t h, const void *blo
     }
     return bpp;
 }
+
+// A level the pack does not hold, for a texture that is ASTC: one flat colour per block (ASTC's void-extent block: the marker, no extent, then RGBA as 16-bit values), the mean
+// of the b x b texels the block covers. Blurred to the block, but a valid picture of the right colours; rgba is the level decoded (nvn_bcsub_decode)
+void nvn_bcsub_void_blocks(const uint8_t *rgba, uint32_t w, uint32_t h, int b, uint8_t *out) {
+    uint32_t bw = (w + (uint32_t)b - 1) / (uint32_t)b, bh = (h + (uint32_t)b - 1) / (uint32_t)b;
+    for (uint32_t by = 0; by < bh; by++) for (uint32_t bx = 0; bx < bw; bx++) {
+        uint32_t s[4] = {0}, n = 0;
+        for (uint32_t y = by * (uint32_t)b; y < (by + 1) * (uint32_t)b && y < h; y++) for (uint32_t x = bx * (uint32_t)b; x < (bx + 1) * (uint32_t)b && x < w; x++) {
+            const uint8_t *p = rgba + ((size_t)y * w + x) * 4; s[0] += p[0]; s[1] += p[1]; s[2] += p[2]; s[3] += p[3]; n++; }
+        uint8_t *o = out + ((size_t)by * bw + bx) * 16;
+        static const uint8_t head[8] = {0xfc, 0xfd, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+        memcpy(o, head, 8);
+        for (int c = 0; c < 4; c++) { uint32_t v = n ? (s[c] + n / 2) / n : 0; uint16_t v16 = (uint16_t)(v * 257); o[8 + 2 * c] = (uint8_t)v16; o[9 + 2 * c] = (uint8_t)(v16 >> 8); }
+    }
+}
