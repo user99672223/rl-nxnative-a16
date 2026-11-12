@@ -59,6 +59,18 @@ Read this first in every session. Newest status at the top of each section.
   1280x720 format 0x25 with present interval 1, a 520 MB memory pool, AudioOut 6 channels, HID; heap 3.13 GB. Stopped at
   `account::GetUserId` of a never-opened handle (the game asks per player slot before opening: `main+0xaa495c`) → host fixed
   to fail such a call instead of dying (`hle_account.c`).
+- Run 43161239013 (run 6): past the user and save, **every package opened, real draws submitted, first presents**, memory
+  1.85 GB (Metal 947 MB) under the 4000 MiB budget. Died after ~8 s: `NVN command list …: record {op 36, size 368} … 0 bytes
+  into its piece of 56`. Cause (Ghidra, `main+0xa94be8` begin / `main+0xa9505c` flush): Panic Button's RHI keeps a ring of
+  command buffers; one left recording with only its 3 set-up commands (56 bytes, the baseline it stores at +0xa4 and never
+  submits alone) gets `AddCommandMemory` of the **same block** again when the ring's memory wraps, so the control list holds
+  two pieces at one address. Hardware just replays the methods lying there. Host fix: a piece the new memory overlaps is
+  kept in a host copy (`hle_nvn.c cmd_new_segment`, `piece_keep`); a piece overwritten some other way is replayed up to
+  the last whole record with a red line instead of dying (`nvn_queue.inc nq_flatten`, `DM_NVN_STRICT_PIECES` for the old die).
+- Frame rate (decision): the game asks for present interval 1 and ticks by real delta, physics at fixed 120 Hz inside
+  (2 substeps at 60 fps, 4 at 30, limit 5 → speed correct down to 24 fps). So profile `fps_target 60` +
+  `present_interval display`: upstream's Frame rate setting (30 / 60) applies as the present interval alone. "Unlocked" is
+  not offered: the iPhone 15's DisplayPort output is 60 Hz, and the engine's smoothing limit is 62.
 - Encrypted build cache works: 12 GB build folder (8.8 GB of it Mac shader libraries) → 1.7 GB archive in the Actions cache.
 
 ## CI loops (all manual-dispatch or push to main; logs with game data are encrypted)
