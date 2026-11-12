@@ -15976,6 +15976,8 @@ static int present_encode(id<MTLCommandBuffer> cb, id<MTLTexture> src, id<MTLTex
     [en endEncoding];
     return 1;
 }
+static _Atomic uint64_t g_perf_sizes;   // the presented picture's width and height, the drawable's width and height, 16 bits each (the present)
+void mtl_perf_sizes(uint32_t *rw, uint32_t *rh, uint32_t *ow, uint32_t *oh) { uint64_t v = atomic_load(&g_perf_sizes); *rw = (uint32_t)(v >> 48); *rh = (uint32_t)(v >> 32) & 0xffff; *ow = (uint32_t)(v >> 16) & 0xffff; *oh = (uint32_t)v & 0xffff; }
 // ---------- Upscaling in the present (DM_PRESENT_UPSCALE) ----------
 // Opt-in spatial scaling of the valid content to its letterboxed viewport. Copy the crop to an origin-aligned texture, scale in perceptual mode (present_raw_src supplies gamma
 // bytes), then draw 1:1 with the usual origin and output format. Queue barriers serialize both the frame's rendering and reuse of the scaler's textures across presents.
@@ -16326,6 +16328,9 @@ static int present_now(const tex_t *t, double period, uint64_t frame, uint64_t t
 
     if (atomic_load(&g_gpu_lost)) return 0;   // the display command buffer would be ignored too: take no drawable from the screen the front end is about to close
     CAMetalLayer *layer = (__bridge CAMetalLayer *)front_metal_layer();
+    // For the performance record and the diagnostic panel (mtl_perf_sizes): the picture the game presents and the drawable it is shown on (0 x 0 headless)
+    atomic_store(&g_perf_sizes, (uint64_t)(crop ? (uint32_t)crop[2] : (uint32_t)src.width) << 48 | (uint64_t)(crop ? (uint32_t)crop[3] : (uint32_t)src.height) << 32
+                                | (uint64_t)(layer ? (uint32_t)layer.drawableSize.width : 0) << 16 | (uint64_t)(layer ? (uint32_t)layer.drawableSize.height : 0));
     if (!layer) return 0;
     if (g_present_layer_resident != layer) { [g_q4 addResidencySet:layer.residencySet]; g_present_layer_resident = layer; }
 #if TARGET_OS_OSX
