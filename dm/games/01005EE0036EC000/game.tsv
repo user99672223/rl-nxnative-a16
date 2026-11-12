@@ -37,6 +37,13 @@ mem_used	0x5200000
 # Nothing leaves the device: the host has no network at all (every service answers "no connection"), and with this key the launcher offers no cloud-save folder either
 offline_only	on
 
+# ---- Frame rate ----
+# The game asks for present interval 1 (60 fps, as on the Switch) and steps by the time that passed: Unreal's tick takes the real delta, and the physics runs its own fixed
+# 120 Hz steps inside it (EngineShare_TA PhysicsFramerate=120, MaxPhysicsSubsteps=5: 2 steps a frame at 60 fps, 4 at 30, so the speed holds down to 24 fps). So the player's
+# Frame rate (30 / 60) is applied as the present interval alone; the engine's own smoothing limit (62 fps, main+0xae6154) stays above both
+fps_target	60
+present_interval	display
+
 # ---- Settings ----
 # The engine's system settings are held from the host for the player's Render scale and Dynamic resolution (dm/host/hle_ue3set.c; the table is found in main at run time)
 ue3_settings	on
