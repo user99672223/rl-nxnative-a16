@@ -1,0 +1,42 @@
+# Game profile of Rocket League (Switch, base game 1.0.0 = v0). Bring-up in progress: see README.md beside this file and PROGRESS.md at the repository root
+# Format: see dm/games/README.md
+# Psyonix's game on Panic Button's Unreal Engine 3 port (package version 868, licensee 20) with Scaleform, PhysX 2 and Wwise, SDK 3.5.0, NVN. Modules main and sdk.
+# The shaders are the global shader cache (globalshadercache-nnx.bin) and the caches inline in the cooked packages, whose chunks are Oodle (shader_split.py ue3_shaders).
+
+# ---- Identity ----
+title_id	01005EE0036EC000
+program_id	01005EE0036EC000
+
+# ---- App ----
+name	Rocket League
+ipa	RocketLeague.ipa
+app_category	public.app-category.sports-games
+
+# ---- Versions ----
+build	v0	1.0.0	main=becfed979bb4204fbd0945cd450fb296	sdk=0ac561f7b400007b97516d024c903a14
+package	v0
+shader_versions	v0
+
+# ---- Files ----
+# every module main imports from
+modules	main sdk
+romfs_marker	tagame/cookednnx/textures6.tfc
+zip_store	.bin:.bmp:.bnk:.tfc:.upk:.wem:.xxx:.metallib
+
+# ---- Memory ----
+# The packing script's guess from the survey, not measured yet: main sets a heap of at most the pool − 64 MB, a 3,328 MB heap region; the NPDM declares no system resource
+# (no virtual address memory)
+mem_reserve	0x100000000
+mem_alias	0x10000000
+mem_stack	0x10000000
+app_pool	0xCD500000
+sys_resource	0x0
+mem_used	0x5200000
+
+# ---- Settings ----
+# The engine's system settings are held from the host for the player's Render scale and Dynamic resolution (dm/host/hle_ue3set.c; the table is found in main at run time)
+ue3_settings	on
+
+# ---- Shader split ----
+shader_groups	/tagame/=tagame
+shader_note	Rocket League® shaders
