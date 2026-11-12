@@ -252,3 +252,20 @@ SSC("nnsslConnectionSetNextAlpnProto", h_nssl_SetAlpn) SSC("nnsslConnectionSetOp
 SSC("nnsslConnectionSetSessionCacheMode", h_nssl_SetCache) SSC("nnsslConnectionSetSocketDescriptor", h_nssl_SetSock)
 SSC("nnsslConnectionSetVerifyOption", h_nssl_SetVerify) SSC("nnsslConnectionWrite", h_nssl_Write)
 SSC("nnsslContextDestroy", h_nssl_CtxDestroy) SSC("nnsslContextGetContextId", h_nssl_CtxGetId)
+
+// ---------- SDK 3 forms (Rocket League 1.0, SDK 3.5.0): the same cuts under the names that SDK's main imports ----------
+// Each of these ends in an IPC to the bsd, sfdnsres, ssl or nifm service on Horizon; none is reached in an offline run that the cuts above already turn away (no socket is ever made,
+// no connection created), so these answer what the service would for "no network" and keep a stray call from reaching nn::sm.
+SKF("_ZN2nn6socket5IoctlEijPvm", h_sk_Ioctl3, int s, unsigned c, void *d, unsigned long n) { (void)s; (void)c; (void)d; (void)n; return sk_fail(); }
+HLE_FORCE("_ZN2nn6socket13GetHostByNameEPKc", "name resolution (cut): NULL", void *, h_sk_GetHostByName3, const char *n) { (void)n; t_skerr = SK_ENETDOWN; return NULL; }
+HLE_FORCE("_ZN2nn6socket13GetHostByAddrEPKvji", "name resolution (cut): NULL", void *, h_sk_GetHostByAddr3, const void *a, unsigned l, int t) { (void)a; (void)l; (void)t; t_skerr = SK_ENETDOWN; return NULL; }
+HLE_FORCE("_ZN2nn6socket9GetHErrnoEv", "resolver error (cut): NO_RECOVERY", int, h_sk_GetHErrno3, void) { return 3; }
+HLE_FORCE("_ZN2nn6socket9HStrErrorEi", "resolver error text (cut)", const char *, h_sk_HStrError3, int e) { (void)e; return "no network"; }
+SKF("nnsocketGetHostByNameCancel", h_nsk_GetHostCancel3, const char *n, int h) { (void)n; (void)h; return sk_fail(); }
+SKF("nnsocketCancel", h_nsk_Cancel3, int h) { (void)h; return sk_fail(); }
+SKF("nnsocketRequestCancelHandle", h_nsk_ReqCancel3, int *h) { if (h) *h = 0; return sk_fail(); }
+SSF("_ZN2nn3ssl10Connection15SetVerifyOptionENS1_12VerifyOptionE", h_ssl_CnVerify3, void *self, int o) { (void)self; (void)o; return RES_FAIL; }
+SSF("_ZN2nn3ssl10Connection15GetConnectionIdEPm", h_ssl_CnId3, void *self, uint64_t *id) { (void)self; if (id) *id = 0; return RES_FAIL; }
+SSF("_ZN2nn3ssl10Connection29GetNeededServerCertBufferSizeEPj", h_ssl_CnCertSize3, void *self, uint32_t *n) { (void)self; if (n) *n = 0; return RES_FAIL; }
+SSF("_ZN2nn3ssl10Connection5WriteEPKcPij", h_ssl_CnWrite3, void *self, const char *b, int *o, unsigned n) { (void)self; (void)b; (void)n; if (o) *o = 0; return RES_FAIL; }
+HLE_FORCE("_ZN2nn4nifm26HandleNetworkRequestResultEv", "offline: the request's result is a failure, no system network screen is shown", Result, h_nifm_HandleRes3, void) { return RES_FAIL; }
