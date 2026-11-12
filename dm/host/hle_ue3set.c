@@ -16,6 +16,7 @@
 
 enum { UE3_INT = 2, UE3_FLOAT = 4, UE3_BOOL = 5 };
 #define UE3_MAX 256
+#define DM_UE3_KICK_DEFAULT "game"   // until the merged frame has been seen on a GPU
 #define UE3_IMAGE_MAX ((uint64_t)1 << 30)   // no main with its bss is larger
 typedef struct { char name[48]; int type; uint8_t *var; int held; uint32_t want; uint32_t orig; int have_orig; } ue3_row;
 static ue3_row g_row[UE3_MAX]; static int g_nrow; static pthread_once_t g_once = PTHREAD_ONCE_INIT; static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -172,7 +173,8 @@ static void ue3_tick(int present) {
             free(s);
         }
         const char *d = getenv("DM_UE3_DUMP"); dump = d && atoi(d) > 0;
-        { void dm_nx_settings_start(void); extern char **environ; for (char **q = environ; *q; q++) if (!strncmp(*q, "DM_UE3_SCALE=", 13) || !strncmp(*q, "DM_UE3_RES=", 11) || !strncmp(*q, "DM_UE3_DYNRES", 13) || !strncmp(*q, "DM_UE3S_", 8)) { dm_nx_settings_start(); break; } }
+        { void dm_nx_kick_start(void); dm_nx_kick_start(); }
+        { void dm_nx_settings_start(void); extern char **environ; for (char **q = environ; *q; q++) if (!strncmp(*q, "DM_UE3_", 7) || !strncmp(*q, "DM_UE3S_", 8)) { dm_nx_settings_start(); break; } }
     }
     if (present) ue3_smooth_tick();
     if (dump && !present) dm_ue3_dump("device initialisation");
@@ -198,6 +200,10 @@ static void ue3_tick(int present) {
 // Read when the game starts (every present thread's first tick) and applied again by dm_nx_setting_live when the panel or the in-game menu changes one.
 void dm_perf_mark(const char *what);
 __attribute__((weak)) void dm_perf_mark(const char *what) { (void)what; }
+static int ue3_kick_build(void) {   // the builds whose patches.py has the kick gate
+    for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main")) return !strcmp(g_mod[i].build_id, "becfed979bb4204fbd0945cd450fb296");
+    return 0;
+}
 static void nx_apply(const char *env, const char *v, int live) {
     char note[160]; snprintf(note, sizeof note, "%s=%s", env, v ? v : "");
     if (!strcmp(env, "DM_UE3_SCALE")) {
@@ -213,6 +219,10 @@ static void nx_apply(const char *env, const char *v, int live) {
         // The size the game renders at (its window, viewport and render targets; 1280x720 as shipped): read by the engine when it starts, so a change takes a restart
         unsigned w = 0, h = 0; if (v && sscanf(v, "%ux%u", &w, &h) == 2 && w >= 640 && w <= 3840 && h >= 360 && h <= 2160) { char a[16], b[16]; snprintf(a, sizeof a, "%u", w); snprintf(b, sizeof b, "%u", h); dm_ue3_set("ResX", a); dm_ue3_set("ResY", b); }
         else { dm_ue3_set("ResX", ""); dm_ue3_set("ResY", ""); }
+    } else if (!strcmp(env, "DM_UE3_KICK")) {
+        // The renderer's mid-frame kicks (RHIKickCommandBuffer), gated by the rewriter's stub on a setting no code reads (dm/games/01005EE0036EC000/patches.py): merge = no
+        // kicks, so the frame's command lists are few and its render passes stay open; game = as shipped. Always held, since the config's own value of the setting is arbitrary
+        if (ue3_kick_build()) dm_ue3_set("SpeedTreeLeaves", v && !strcmp(v, "merge") ? "1" : "0");
     } else if (!strcmp(env, "DM_UE3_SMOOTH")) { atomic_store(&g_smooth_on, !(v && !strcmp(v, "game")));
     } else if (!strncmp(env, "DM_UE3S_", 8)) dm_ue3_set(env + 8, v && strcmp(v, "game") ? v : "");
     else return;
@@ -220,11 +230,12 @@ static void nx_apply(const char *env, const char *v, int live) {
 }
 // value NULL: whether env is one of these settings; otherwise applies it now. 1 when it is one
 int dm_nx_setting_live(const char *env, const char *value) {
-    if (!env || (strcmp(env, "DM_UE3_SCALE") && strcmp(env, "DM_UE3_RES") && strcmp(env, "DM_UE3_SMOOTH") && strcmp(env, "DM_UE3_DYNRES") && strcmp(env, "DM_UE3_DYNRES_MIN") && strncmp(env, "DM_UE3S_", 8))) return 0;
+    if (!env || (strcmp(env, "DM_UE3_SCALE") && strcmp(env, "DM_UE3_RES") && strcmp(env, "DM_UE3_KICK") && strcmp(env, "DM_UE3_SMOOTH") && strcmp(env, "DM_UE3_DYNRES") && strcmp(env, "DM_UE3_DYNRES_MIN") && strncmp(env, "DM_UE3S_", 8))) return 0;
     if (!strncmp(env, "DM_UE3S_", 8) && !find_row(env + 8)) return 0;
     if (value) nx_apply(env, value, 1);
     return 1;
 }
+void dm_nx_kick_start(void) { if (ue3_kick_build() && !getenv("DM_UE3_KICK")) { pthread_once(&g_once, ue3_find); if (g_nrow) nx_apply("DM_UE3_KICK", DM_UE3_KICK_DEFAULT, 0); } }
 void dm_nx_settings_start(void) {
     pthread_once(&g_once, ue3_find); if (!g_nrow) return;
     extern char **environ;

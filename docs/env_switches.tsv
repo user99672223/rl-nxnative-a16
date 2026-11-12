@@ -401,6 +401,7 @@ DM_UDC_SELFTEST	diagnostic	`=1` runs a start-up check of DontCare load and store
 DM_UE3_DUMP	diagnostic	`1` logs every Unreal Engine 3 system setting with its value at frames 1 and 600 (`dm/host/hle_ue3set.c`)
 DM_UE3_DYNRES	player	`game` leaves the game's dynamic resolution on, `off` holds `AllowDynamicResolution` at 0 (`hle_ue3set.c`); for a profile with `ue3_settings on`
 DM_UE3_DYNRES_MIN	player	`0.5` to `1.0`: the lowest scale the game's dynamic resolution may go to (`MinimumScreenScale`, `hle_ue3set.c`)
+DM_UE3_KICK	player	`merge` drops Unreal Engine 3's mid-frame `RHIKickCommandBuffer` submissions (Rocket League 1.0: the stub of its `patches.py`, flag held through the settings table by `hle_ue3set.c`), so render passes stay open across them; `game` (default) keeps them
 DM_UE3_PKG_KEY	path	(tools) the game's package key as 64 hex digits, for `dm/tools/ue3_astc.py` to read an Unreal Engine 3 game's package tables; never in the repository
 DM_UE3_RES	player	`<W>x<H>` (`2560x1440`) holds the Unreal Engine 3 settings `ResX` / `ResY` from before the engine makes its window, so the game renders natively at that size; `game` leaves its own (`hle_ue3set.c`)
 DM_UE3_SCALE	player	`0.5` to `1.0`: below 1 the 3D picture is held at that fraction (`ScreenPercentage`) and the game's dynamic resolution is off; `1.0` leaves both to the game (`hle_ue3set.c`)

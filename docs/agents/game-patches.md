@@ -25,6 +25,8 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 
 | Now → goal | Patch | Purpose | Status | Evidence | Games | Where | Why |
 |---|---|---|---|---|---|---|---|
+| `build` → `engine` | RHIKickCommandBuffer returns at once while the host's flag is set | rendering | gap | judgement | 1 | [Rocket League](../../dm/games/01005EE0036EC000/README.md) | Unreal Engine 3's kick in Panic Button's NVN RHI; a function-matched rule could carry it to the game's updates |
+| `build` → `engine` | the host's flag of Rocket League's RHIKickCommandBuffer gate (its patches.py) | rendering | gap | judgement | 1 | [Rocket League](../../dm/games/01005EE0036EC000/README.md) | follows the rewriter stub of the same build |
 | `build` → `game` | frame limiter 30 → 60 fps and the 1/60 update step | frame rate | gap | judgement | 1 | [DARK SOULS: REMASTERED](../../dm/games/01004AB00A260000/README.md) | the game's own limiter constant and fixed step |
 | `build` → `game` | frame limiter spin: its branch back cut | frame rate | gap | judgement | 1 | [Need For Speed™ Hot Pursuit Remastered](../../dm/games/010029B0118E8000/README.md) | the engine's own spin limiter; a function-matched rule could carry it over the game's updates |
 | `build` → `game` | frame step floor 2 → 1 vsync, and its frame step | frame rate | gap | judgement | 1 | [Paper Mario: The Thousand-Year Door](../../dm/games/0100ECD018EBE000/README.md) | the game's own clock floor and step; MATCH_CUTS and MATCH_FRAME_STEP could carry the cut and the stub, both near the step's function (main+0x2e7750; one function not checked yet) |
@@ -42,6 +44,7 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 | `build` → `engine` | Next Level Games' frame limiter target at a fixed address | frame rate | blocked: one game on that engine here | judgement | 1 | [Luigi's Mansion 3](../../dm/games/0100DCA0064A6000/README.md) | the studio's engine, which its other games ship |
 | `build` → `engine` | RE Engine's frame limit at a fixed pointer | frame rate | blocked: one RE Engine game here | judgement | 1 | [Monster Hunter Rise](../../dm/games/0100B04011742000/README.md) | engine code other RE Engine games ship |
 | `build` → `engine` | Unity's constant-buffer table locked on the shared device | race | blocked: the stubs have no function-matched form yet, and no other Unity 2018.4 main on the drive shares these functions (Ori and the Blind Forest 1.0.2: no fingerprint match) | checked: probes of both threads inserting the same key and of the table API's callers by thread; Blind Forest main compared with nso_fnmap | 1 | [Ori and the Will of the Wisps](../../dm/games/01008DD013200000/README.md) | Unity 2018.4's threaded GfxDevice: the main thread registers layouts on the real device while the render thread uses the same table; any Unity 2018.4 build with this code has the race |
+| `build` → `engine` | Unreal Engine 3's frame-rate smoothing held flat (GEngine's MinSmoothedFrameRate at fixed offsets) | frame rate | blocked: one game on this engine version here | judgement | 1 | [Rocket League](../../dm/games/01005EE0036EC000/README.md) | UEngine's fields, the same in any game on this engine version; found by GetMaxTickRate's shape they could be read from the code |
 | `build` → `game` | 60 fps frame step on 1.3.0 (the same stub at its known addresses) | frame rate | blocked: 1.3.0's main is on neither drive to fingerprint (v458752 is the update on them) | judgement | 1 | [Hyrule Warriors: Age of Calamity](../../dm/games/01002B00111A2000/README.md) | the stub above, placed at 1.3.0's addresses: the matched rule would serve it once its functions are fingerprinted |
 | `build` → `game` | screen shape: the sizes, the view, the layouts' projection and their edge widgets (DM_SCREEN_ASPECT) | rendering | blocked: the stubs have no function-matched form yet | judgement | 1 | [Animal Crossing: New Horizons](../../dm/games/01006F8002326000/README.md) | the output size is the host's, but where the game takes its sizes, its cameras and its layouts are this build's code |
 | `build` → `game` | 60 fps intervals and dynamic-resolution constants | frame rate | kept: 1.0.3 (v131072) is the newest update of both releases and likely their last: a function match would serve no other build; the rewriter would also need matched rules that write fixups and declare capabilities, a new mechanism (2026-11-09) | checked: both releases' mains, where the host's rows for them were found; the global main's sites mapped into ASTRAL CHAIN and Bayonetta 1-3 (2026-11-09) | 2 | [NieR:Automata The End of YoRHa Edition (010056B015FE8000)](../../dm/games/010056B015FE8000/README.md); [NieR:Automata The End of YoRHa Edition (0100B8E016F76000)](../../dm/games/0100B8E016F76000/README.md) | the game's own constants; the Asian release's function is the global one's 0x13c0 further on, so one function-matched rule could serve both releases. No PlatinumGames sibling shares the code: none of its sites has an exact match in ASTRAL CHAIN or Bayonetta 1-3 (nso_fnmap, 2026-11-09) |
@@ -75,6 +78,7 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 | [Ori and the Will of the Wisps](#ori-and-the-will-of-the-wisps) | 0 | 0 | 10 | 0 | 0 | `build` → `engine` |
 | [Paper Mario: The Thousand-Year Door](#paper-mario-the-thousand-year-door) | 1 | 0 | 1 | 0 | 0 | `build` → `game` |
 | [Pokémon Legends: Arceus](#pokémon-legends-arceus) | 0 | 0 | 0 | 1 | 0 | `game` |
+| [Rocket League](#rocket-league) | 0 | 0 | 1 | 0 | 2 | `build` → `engine` ×3 |
 | [Super Mario 3D All-Stars: Super Mario Sunshine](#super-mario-3d-all-stars-super-mario-sunshine) | 2 | 0 | 0 | 0 | 0 | `build` → `game` |
 | [Super Smash Bros. Ultimate](#super-smash-bros-ultimate) | 11 | 0 | 0 | 1 | 0 | `game` |
 | [Taiko Risshiden V DX](#taiko-risshiden-v-dx) | 1 | 0 | 0 | 2 | 0 | `game` |
@@ -458,6 +462,19 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 - **`game`**, runtime, at goal, checked: function-matched on 1.1.1, the only build on hand: exactly one match, a boot to the field setup, and the patched function run on the module's own bytes in a small interpreter for both null paths. Issue #712's reporters ran the earlier cuts for about 7 hours with no crash; the path itself has not been reached with these cuts: capture demo: the empty result when the weak reference at +0x88 is unset or dead. The game's own function dereferences its own weak reference; no host service is on the path, so no host or engine rule can hold it. Whether another Game Freak game shares the function is unchecked
 
 - **function-matched** (`main` of builds without CUTS): capture demo: the empty result when the weak reference at +0x88 is unset or dead: 1 function, 5 cuts
+
+### Rocket League
+
+[Rocket League](../../dm/games/01005EE0036EC000/README.md), `01005EE0036EC000`, [patches.py](../../dm/games/01005EE0036EC000/patches.py).
+
+- **`build` → `engine`**, rendering, gap, judgement: RHIKickCommandBuffer returns at once while the host's flag is set. Unreal Engine 3's kick in Panic Button's NVN RHI; a function-matched rule could carry it to the game's updates
+- **`build` → `engine`**, frame rate, blocked: one game on this engine version here, judgement: Unreal Engine 3's frame-rate smoothing held flat (GEngine's MinSmoothedFrameRate at fixed offsets). UEngine's fields, the same in any game on this engine version; found by GetMaxTickRate's shape they could be read from the code
+- **`build` → `engine`**, rendering, gap, judgement: the host's flag of Rocket League's RHIKickCommandBuffer gate (its patches.py). Follows the rewriter stub of the same build
+
+- **1.0.0 `main`** `becfed97…` ([patches.py:30](../../dm/games/01005EE0036EC000/patches.py#L30))
+  - stub `+0xa95968`: RHIKickCommandBuffer returns at once while the host's flag is set (the frame's passes stay open across the renderer's kicks)
+  - host [hle_ue3set.c:138](../../dm/host/hle_ue3set.c#L138): Unreal Engine 3's frame-rate smoothing held flat
+  - host [hle_ue3set.c:204](../../dm/host/hle_ue3set.c#L204): build check
 
 ### Super Mario 3D All-Stars: Super Mario Sunshine
 
