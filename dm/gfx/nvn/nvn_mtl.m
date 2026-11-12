@@ -14681,7 +14681,45 @@ static int rb_swap_gpu(uint64_t src, size_t row, size_t img, uint64_t dst, size_
 // Whether a copy into or out of this host texture crosses between the guest's order and Metal's for the RGB565 family: the red bit position (rb_packed_shift), 0 for other formats and for a
 // texture on a pool's buffer, which holds the guest's bits (linear and buffer textures)
 static int rb_copy_shift(const tex_t *t, id<MTLTexture> mt) { return mt.buffer ? 0 : rb_packed_shift(t->d.format); }
+// ---------- Copies into a BC texture on a GPU without BC formats (g_bcsub) ----------
+// On the GPU such a texture is ASTC or decoded (bcs_pf), so a copy of BC blocks into it cannot run there. It runs in the texture's storage instead, on the CPU, at its place in
+// the replay: the level is deswizzled, the region's blocks are replaced and it is swizzled back; the write marks the pages, and the texture is uploaded again from its storage at
+// its next use (pkg_upload_bcs), where each level is found in the pack by its content like any other. Unreal's texture streaming makes a larger texture and copies the levels it
+// already had from the smaller one, GPU to GPU. src: the region's rows of blocks, src_row bytes apart. 1 when done
+void mtl_tex_cpu_written(const tex_t *t);
+static int bcs_patch_level(const tex_t *t, unsigned level, unsigned layer, const NVNcopyRegion *r, const uint8_t *src, size_t src_row) {
+    if (!t->mem || (t->pool && nvn_sparse_pool(t->pool)) || t->d.target == 2 || level >= (t->d.levels ? t->d.levels : 1)) return 0;
+    int bw, bh, bpb = nvn_fmt_bpb(t->d.format, &bw, &bh); if (!bpb || bw != 4 || bh != 4) return 0;
+    uint32_t w = MAX(t->d.width >> level, 1u), h = MAX(t->d.height >> level, 1u);
+    size_t cols = (w + 3) / 4, rows = (h + 3) / 4, pitch = cols * (size_t)bpb;
+    if (r->xoffset < 0 || r->yoffset < 0 || (r->xoffset & 3) || (r->yoffset & 3)) return 0;
+    size_t bx = (size_t)r->xoffset / 4, by = (size_t)r->yoffset / 4, nbx = ((size_t)r->width + 3) / 4, nby = ((size_t)r->height + 3) / 4;
+    if (bx + nbx > cols || by + nby > rows || src_row < nbx * (size_t)bpb) return 0;
+    uint8_t *lin = malloc(pitch * rows ? pitch * rows : 1); if (!lin) return 0;
+    int whole = !bx && !by && nbx == cols && nby == rows, ok = 1;
+    if (!whole && nvn_deswizzle(&t->d, level, layer, t->mem, lin, pitch)) ok = 0;
+    for (size_t y = 0; ok && y < nby; y++) memcpy(lin + (by + y) * pitch + bx * (size_t)bpb, src + y * src_row, nbx * (size_t)bpb);
+    if (ok && nvn_swizzle(&t->d, level, layer, lin, pitch, (void *)(uintptr_t)t->mem)) ok = 0;
+    free(lin);
+    return ok;
+}
+// The blocks of a level of a BC texture's storage, linear (malloc'd; *pitch bytes a row of blocks), or NULL
+static uint8_t *bcs_level_blocks(const tex_t *t, unsigned level, unsigned layer, size_t *pitch, size_t *rows) {
+    if (!t->mem || (t->pool && nvn_sparse_pool(t->pool)) || t->d.target == 2 || level >= (t->d.levels ? t->d.levels : 1)) return NULL;
+    int bw, bh, bpb = nvn_fmt_bpb(t->d.format, &bw, &bh); if (!bpb || bw != 4 || bh != 4) return NULL;
+    uint32_t w = MAX(t->d.width >> level, 1u), h = MAX(t->d.height >> level, 1u);
+    *pitch = (size_t)((w + 3) / 4) * (size_t)bpb; *rows = (h + 3) / 4;
+    uint8_t *lin = malloc(*pitch * *rows ? *pitch * *rows : 1);
+    if (lin && nvn_deswizzle(&t->d, level, layer, t->mem, lin, *pitch)) { free(lin); lin = NULL; }
+    return lin;
+}
+static _Atomic uint64_t g_bcs_copies;
+static void bcs_copy_done(const tex_t *dst, int ok, const char *what) {
+    if (ok) { mtl_tex_cpu_written(dst); nvn_dirty_touch(); uint64_t n = atomic_fetch_add(&g_bcs_copies, 1) + 1; if (n == 1 || n % 4096 == 0) MLOG("BC textures: %llu GPU copies into a BC texture done in its storage on the CPU (%s)", (unsigned long long)n, what); }
+    else RED_ONCE(170, "%s into a BC texture on a GPU without BC formats could not be done in its storage (ser=%llu format %#x target %d %ux%u levels %u): the copy is lost", what, (unsigned long long)dst->serial, dst->d.format, dst->d.target, dst->d.width, dst->d.height, dst->d.levels);
+}
 static void copy_t2b(const p_copy_b2t *c, uint32_t size) {
+    if (g_bcsub && c->tex && nvn_bcsub_kind(c->tex->d.format, NULL, NULL)) { RED_ONCE(171, "texture-to-buffer copy from a BC texture on a GPU without BC formats: not done, the buffer keeps its bytes (ser=%llu format %#x)", (unsigned long long)c->tex->serial, c->tex->d.format); return; }
     rp_flush();   // Materialize pending clears before reading, matching copy_t2t.
     g_wr_epoch++; g_mdx_epoch++;
     if (c->tex) xv_check(c->tex->serial, c->has_view && c->view.set_levels ? c->view.base_level : 0, c->has_view && c->view.set_layers ? c->view.min_layer : 0, "texture-to-buffer copy");
@@ -14806,6 +14844,12 @@ static void copy_b2t(const p_copy_b2t *c, uint32_t size) {
        c->tex->d.format, level, layer0, c->r.xoffset, c->r.yoffset, c->r.zoffset, c->r.width, c->r.height, c->r.depth, (unsigned long long)c->src, row, img);
     void *mb; uint64_t mo;
     if (!mtl_addr(c->src, img * nz, &mb, &mo)) { RED_ONCE(23, "buffer→texture copy source is in no memory pool"); return; }
+    if (g_bcsub && nvn_bcsub_kind(c->tex->d.format, NULL, NULL)) {   // not BC on this GPU: the copy goes into the texture's storage (bcs_patch_level)
+        int ok = !is3d;
+        for (int z = 0; ok && z < nz; z++) ok = bcs_patch_level(c->tex, level, layer0 + (unsigned)c->r.zoffset + (unsigned)z, &c->r, (const uint8_t *)(uintptr_t)c->src + (size_t)z * img, row);
+        bcs_copy_done(c->tex, ok, "buffer-to-texture copy");
+        return;
+    }
     g_cut_copy = 1;
     if (is3d && passdump()) { const char *dd = getenv("DM_NVN_CBDUMP"); if (dd) {   // the source bytes of a 3D upload, beside the uniform dumps (F<frame>_c3d_<serial>.bin)
         char p[1024]; snprintf(p, sizeof p, "%s/F%llu_c3d_%llu.bin", dd, (unsigned long long)atomic_load(&g_cur_frame), (unsigned long long)c->tex->serial);
@@ -15136,6 +15180,21 @@ static id<MTLTexture> copy_t2t_enc(const p_copy_t2t *c) {
 // The destination's written region reaches its storage too when the CPU can read it (gsb_store), after the copy in command order: a 3D destination's planes from the region's z, any
 // other's layers from the view's first
 static void copy_t2t(const p_copy_t2t *c) {
+    if (g_bcsub && c->src && c->dst && nvn_bcsub_kind(c->dst->d.format, NULL, NULL)) {   // into a texture that is not BC on this GPU: storage to storage on the CPU (bcs_patch_level)
+        int ok = nvn_bcsub_kind(c->src->d.format, NULL, NULL) != 0 && c->sr.width == c->dr.width && c->sr.height == c->dr.height && !(c->sr.xoffset & 3) && !(c->sr.yoffset & 3) && c->sr.xoffset >= 0 && c->sr.yoffset >= 0;
+        unsigned sl = c->has_sv && c->sv.set_levels ? c->sv.base_level : 0, dl = c->has_dv && c->dv.set_levels ? c->dv.base_level : 0;
+        unsigned ss = (c->has_sv && c->sv.set_layers ? c->sv.min_layer : 0) + (unsigned)c->sr.zoffset, ds = (c->has_dv && c->dv.set_layers ? c->dv.min_layer : 0) + (unsigned)c->dr.zoffset;
+        int nz = c->dr.depth ? c->dr.depth : 1, bw, bh, bpb = nvn_fmt_bpb(c->src->d.format, &bw, &bh), dbpb = nvn_fmt_bpb(c->dst->d.format, &bw, &bh);
+        if (bpb != dbpb) ok = 0;
+        for (int z = 0; ok && z < nz; z++) {
+            size_t pitch, rows; uint8_t *lin = bcs_level_blocks(c->src, sl, ss + (unsigned)z, &pitch, &rows);
+            size_t bx = (size_t)c->sr.xoffset / 4, by = (size_t)c->sr.yoffset / 4, nbx = ((size_t)c->sr.width + 3) / 4, nby = ((size_t)c->sr.height + 3) / 4;
+            ok = lin && bx * (size_t)bpb + nbx * (size_t)bpb <= pitch && by + nby <= rows && bcs_patch_level(c->dst, dl, ds + (unsigned)z, &c->dr, lin + by * pitch + bx * (size_t)bpb, pitch);
+            free(lin);
+        }
+        bcs_copy_done(c->dst, ok, "texture-to-texture copy");
+        return;
+    }
     id<MTLTexture> d = copy_t2t_enc(c);
     if (d) gsb_store(c->dst, d, c->has_dv && c->dv.set_levels ? c->dv.base_level : 0, (c->dst->d.target == NVN_TEXTURE_TARGET_3D ? 0 : c->has_dv && c->dv.set_layers ? c->dv.min_layer : 0) + (unsigned)c->dr.zoffset,
                      (unsigned)(c->dr.depth ? c->dr.depth : 1), &c->dr);
