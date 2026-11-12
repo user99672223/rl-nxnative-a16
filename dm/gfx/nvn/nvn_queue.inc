@@ -226,6 +226,11 @@ static void nq_flatten(nq_job *j,const uint8_t *list) {
         if(k!=CTL_CHUNK) die("NVN command list %p: corrupt control entry %#llx at %p",(const void *)list,(unsigned long long)v,(const void *)e);
         const uint8_t *p=ctl_addr(v),*pe=p+ctl_chunk_bytes(v);
         while(p<pe) { op_hdr h; memcpy(&h,p,8);
+            // A piece whose memory the game gave out again before submitting it (hle_nvn.c cmd_new_segment keeps the case it can see): hardware replays the methods now
+            // there up to the piece's length, so the whole records that fit are replayed and the rest dropped
+            if(h.size>=8 && !(h.size&7) && h.size>(size_t)(pe-p) && p+h.size<=pe+CTL_CHUNK_MAX && getenv("DM_NVN_STRICT_PIECES")==NULL) {
+                static _Atomic uint64_t cut; uint64_t c=++cut; if(c==1 || (c&(c-1))==0) LOG("[RED] NVN command list %p: record {op %u, size %u} runs past its piece of %zu at %p (%zu in): the piece's memory was written again before the submit, the rest of it is dropped (%llu so far)",(const void *)list,h.op,h.size,ctl_chunk_bytes(v),(const void *)ctl_addr(v),(size_t)(p-ctl_addr(v)),(unsigned long long)c);
+                break; }
             if(h.size<8 || h.size&7 || h.size>(size_t)(pe-p)) die("NVN command list %p: record {op %u, size %u} at %p, %zu bytes into its piece of %zu at %p",(const void *)list,h.op,h.size,(const void *)p,(size_t)(p-ctl_addr(v)),ctl_chunk_bytes(v),(const void *)ctl_addr(v));
             nq_record(j,p,h); p+=h.size; }
         if(v&CTL_LAST) return;

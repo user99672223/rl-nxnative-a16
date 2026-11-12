@@ -967,10 +967,31 @@ static void put_hdr(uint8_t *p, uint32_t op, uint32_t size) { op_hdr h = {op, si
 static void ctl_chunk_close(cmd_t *o);
 // New segment: the records the recording in progress has in the old segment become one piece of its control list (written at its next record: ctl_push), and its next record
 // opens a piece in the new one
+static void ctl_push(cmd_t *o, uint64_t e); static void ctl_chunk_close(cmd_t *o);
+// Host copies of pieces the game wrote over (cmd_new_segment). A handle is flattened at submit, so a copy is needed until its recording is submitted; nothing tells when a handle
+// is dropped, so the copies live in a ring long enough for any recording still in flight (4096 copies; Rocket League makes one per wrap of its command memory, 56 bytes each)
+#define PIECE_RING 4096
+static uint8_t *piece_keep(const uint8_t *p, size_t n) {
+    static uint8_t *ring[PIECE_RING]; static unsigned at; static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+    uint8_t *m = malloc((n + 7) & ~(size_t)7); if (!m) die("NVN command memory: cannot keep a piece of %zu bytes", n);
+    memcpy(m, p, n);
+    pthread_mutex_lock(&mu); uint8_t *old = ring[at]; ring[at] = m; at = (at + 1) % PIECE_RING; pthread_mutex_unlock(&mu);
+    free(old); return m;
+}
 static void cmd_new_segment(cmd_t *o, uint8_t *mem, size_t n) {
     uint8_t *start = align8(mem), *end = mem + n;
     if (o->recording == 1 && o->cur && cs_on() && o->end > o->cur) { pthread_mutex_lock(&g_cs_mu); g_cs.waste += (uint64_t)(o->end - o->cur); pthread_mutex_unlock(&g_cs_mu); }
-    if (o->recording) ctl_chunk_close(o);
+    if (o->recording) {
+        // The game adds memory that covers this recording's open piece: the piece's records are about to be written over while the handle still lists them. Rocket League (UE3,
+        // Panic Button) does it: a command buffer left recording with only its three set-up commands (56 bytes) gets the same block added again when its ring of command memory
+        // wraps (main+0xa94be8), and the submit then found a 368-byte record in a piece of 56. On hardware the piece replays whatever methods now lie there; here the records
+        // are kept as they were recorded, in a host copy the control entry names
+        if (o->chunk && o->cur > o->chunk && start < o->cur && end > o->chunk) {
+            size_t len = (size_t)(o->cur - o->chunk); uint8_t *keep = piece_keep(o->chunk, len);
+            static _Atomic uint64_t kept; uint64_t k = ++kept; if (k == 1 || (k & (k - 1)) == 0) LOG("[nvn] command memory added over a recording's open piece (%zu bytes at %p): the piece is kept in a host copy (%llu so far)", len, (void *)o->chunk, (unsigned long long)k);
+            ctl_push(o, ctl_e(CTL_CHUNK, keep, len)); o->chunk = NULL;
+        } else ctl_chunk_close(o);
+    }
     o->cur = start; o->end = end;
 }
 // Host-supplied segment when the game's own command memory runs out: when the game's out-of-memory callback cannot allocate from its command memory pool, it calls AddCommandMemory with an empty pool (p = NULL, n = 0)
