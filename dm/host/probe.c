@@ -85,6 +85,14 @@ static void probe_str(uint64_t p) {
     if (p < 0x1000 || vm_read_overwrite(mach_task_self(), p, sizeof buf - 1, (vm_address_t)buf, &got) || !got) return;
     buf[got] = 0; int n = 0; while (buf[n] >= 0x20 && buf[n] < 0x7f) n++;
     if (n >= 3 && (buf[n] == 0 || n == (int)got)) { fprintf(stderr, " \"%.*s\"", n, buf); return; }
+    // A UTF-32 text (Unreal Engine 3's TCHAR on the Switch: its log formats and names), up to 160 characters of printable ASCII
+    if (!(p & 3)) {
+        uint32_t w[160]; vm_size_t wg = 0; char t[161]; int k = 0;
+        if (!vm_read_overwrite(mach_task_self(), p, sizeof w, (vm_address_t)w, &wg) || !vm_read_overwrite(mach_task_self(), p, 64, (vm_address_t)w, &wg)) {
+            int nw = (int)(wg / 4); while (k < nw && ((w[k] >= 0x20 && w[k] < 0x7f) || w[k] == '\n' || w[k] == '\t')) { t[k] = w[k] < 0x20 ? ' ' : (char)w[k]; k++; }
+            if (k >= 3 && (k == nw || w[k] == 0)) { fprintf(stderr, " U\"%.*s\"", k, t); return; }
+        }
+    }
     // Game string object {char* pointer, u64 length, u64 capacity|top bit} (the path argument of 0xdf67f0 FJSONUtils has exactly this layout)
     if (got >= 24) {
         uint64_t ptr, len; memcpy(&ptr, buf, 8); memcpy(&len, buf + 8, 8);
