@@ -209,6 +209,13 @@ Read this first in every session. Newest status at the top of each section.
 - Input: the game does read the presses (probe of its pad object, run 43189985782: buttons 0x1 / 0x2 / 0x400 while A /
   B / Plus are held, on the one connected pad), and still shows nothing new after "PressAnyButtonToStart". Open.
 
+### Disk clean-up on the laptop (owner asked, 2026-11-12)
+
+Deleted, all regenerable: the test IPA (`../RL/ipa/`, re-fetch with `scripts/fetch_ipa.sh`), the local ASTC pack and its
+trial packs (`pack/`, `astc_eval/`; CI builds its own), the extracted RomFS (`data/v0/RomFS`; re-extract from the NSP with
+hactool when a local package read is needed; `data/v0/ExeFS` kept for the rewriter), decompressed packages (`dec/`), CI
+results older than the last 12 runs, pip's cache. Kept: the NSP and keys, Ghidra and its project, `elf/`, `survey/`.
+
 ## CI loops (all manual-dispatch or push to main; logs with game data are encrypted)
 
 | What | How | Time |
