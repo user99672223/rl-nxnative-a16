@@ -3,7 +3,7 @@
 packages, re-encoded offline by dm/tools/bc_astc/bc2astc and keyed by its content, so the host (dm/gfx/tex/nvn_bcsub.c) finds it when the game uploads that level. The game's files
 are not changed: its packages are Oodle-compressed chunks whose sizes it knows, and half its textures are 8-byte-block DXT1, which no ASTC block replaces in place.
 
-    ue3_astc.py <RomFS folder> <out pack> --bc2astc <binary> [--threads N] [--inventory <tsv>] [--limit N]
+    ue3_astc.py <RomFS folder or image> <out pack> --bc2astc <binary> [--threads N] [--inventory <tsv>] [--limit N]
 
 Written for Rocket League 1.0 (package version 868, licensee 20; PROGRESS.md of that port has the measurements):
 - a package is its summary, then the name, import and export tables, AES-256-ECB from the name table to the header size (the summary's +8), then Oodle chunks. The key is the game's,
@@ -45,11 +45,11 @@ def chunks(d, i, end):
     """the chunks of d[i:end] decoded and joined; None when a block could not be decoded"""
     out = []
     while i + 16 <= len(d) and i < end and d[i:i + 4] == TAG:
-        bs, cs, us = struct.unpack_from('<III', d, i + 4)
+        bs, cs, us = struct.unpack('<III', d[i + 4:i + 16])
         if not bs: red(f'chunk at {i:#x} has block size 0')
-        nb = (us + bs - 1) // bs; o = i + 16 + 8 * nb
+        nb = (us + bs - 1) // bs; o = i + 16 + 8 * nb; tab = d[i + 16:o]
         for k in range(nb):
-            c, u = struct.unpack_from('<II', d, i + 16 + 8 * k); blk = d[o:o + c]
+            c, u = struct.unpack_from('<II', tab, 8 * k); blk = d[o:o + c]
             b = bytes(blk) if c == u else oodle(blk, u)
             if b is None: return None
             out.append(b); o += c
@@ -97,9 +97,36 @@ def fstr(d, o):
     if n >= 0: return d[o:o + n].rstrip(b'\0').decode('latin1'), o + n
     return d[o:o - 2 * n].decode('utf-16le', 'replace').rstrip('\0'), o - 2 * n
 
+class View:
+    """a file inside a RomFS image (dm/tools/romfs_image.py): slices of the image's mapping, as bytes"""
+    def __init__(self, mm, off, n): self.mm, self.off, self.n = mm, off, n
+    def __len__(self): return self.n
+    def __getitem__(self, k):
+        if isinstance(k, slice):
+            a, b, _ = k.indices(self.n); return self.mm[self.off + a:self.off + max(a, b)]
+        return self.mm[self.off + (k if k >= 0 else self.n + k)]
+
+def romfs_files(romfs):
+    """{lower-case base name: a zero-argument function returning the file's bytes-like content} of an extracted RomFS folder or a RomFS image"""
+    out = {}
+    if os.path.isdir(romfs):
+        def opener(path):
+            def get():
+                with open(path, 'rb') as f: return mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            return get
+        for f in glob.glob(os.path.join(romfs, '**', '*'), recursive=True):
+            if os.path.isfile(f): out[os.path.basename(f).lower()] = opener(f)
+        return out
+    import romfs_image
+    idx = romfs_image.read_index(romfs)
+    fh = open(romfs, 'rb'); mm = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
+    for path, (isdir, off, size) in idx.items():
+        if not isdir: out[os.path.basename(path).lower()] = (lambda off=off, size=size: View(mm, off, size))
+    return out
+
 class Package:
-    def __init__(self, path, key):
-        with open(path, 'rb') as f: self.raw = raw = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+    def __init__(self, raw, key):
+        self.raw = raw = raw[:] if isinstance(raw, View) else raw   # a package is read whole (the largest is 49 MB)
         if raw[:4] != TAG: raise ValueError('not an Unreal package')
         self.ver, self.lic, self.hs = struct.unpack_from('<HHI', raw, 4)
         _, o = fstr(raw, 12)
@@ -174,21 +201,22 @@ def main():
     kh = os.environ.get('DM_UE3_PKG_KEY', '')
     if len(kh) != 64: red('DM_UE3_PKG_KEY must hold the game\'s package key as 64 hex digits')
     key = bytes.fromhex(kh)
-    files = sorted(f for f in glob.glob(os.path.join(a.romfs, '**', '*'), recursive=True) if f.lower().endswith(('.xxx', '.upk')))
+    sys.path.insert(0, HERE)
+    every = romfs_files(a.romfs)
+    files = sorted(n for n in every if n.endswith(('.xxx', '.upk')))
     if a.limit: files = files[:a.limit]
-    tfcs = {os.path.basename(f).lower()[:-4]: f for f in glob.glob(os.path.join(a.romfs, '**', '*'), recursive=True) if f.lower().endswith('.tfc')}
+    tfcs = {n[:-4]: every[n] for n in every if n.endswith('.tfc')}
     tfc_map = {}
     def tfc(name):
-        if name not in tfc_map:
-            with open(tfcs[name], 'rb') as f: tfc_map[name] = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        if name not in tfc_map: tfc_map[name] = tfcs[name]()
         return tfc_map[name]
     enc = subprocess.Popen([a.bc2astc, a.out] + ([str(a.threads)] if a.threads else []), stdin=subprocess.PIPE)
     enc.stdin.write(b'BCJ2')
     inv = open(a.inventory, 'w') if a.inventory else None
     seen = set(); st = collections.Counter(); levels_seen = {}
     for fi, f in enumerate(files):
-        try: P = Package(f, key)
-        except (ValueError, struct.error, IndexError) as e: st['packages not read'] += 1; print(f'[RED] {os.path.basename(f)}: {e}', file=sys.stderr); continue
+        try: P = Package(every[f](), key)
+        except (ValueError, struct.error, IndexError) as e: st['packages not read'] += 1; print(f'[RED] {f}: {e}', file=sys.stderr); continue
         for cls, name, off, size in P.exports:
             if cls not in TEX_CLASSES: continue
             try: t = texture(P, off, size)
@@ -221,7 +249,7 @@ def main():
             for u, g in zip(use, got):
                 lin = g[1] if g[1] is not None else level(*u, True)[1]
                 out.append((u[2], u[3], lin))
-                if inv: inv.write('\t'.join(map(str, (os.path.basename(f), name, cls, fmt, pr.get('SRGB', 1), pr.get('CompressionSettings') or '', u[0], u[2], u[3], hex(u[1]), len(lin)))) + '\n')
+                if inv: inv.write('\t'.join(map(str, (f, name, cls, fmt, pr.get('SRGB', 1), pr.get('CompressionSettings') or '', u[0], u[2], u[3], hex(u[1]), len(lin)))) + '\n')
             seen.add(sig); st['textures encoded'] += 1; st['levels encoded'] += len(out); st['bytes of BC blocks'] += sum(len(x[2]) for x in out)
             enc.stdin.write(struct.pack('<BBH', kind, mode, len(out)))
             for w, h, lin in out: enc.stdin.write(struct.pack('<III', w, h, len(lin))); enc.stdin.write(lin)

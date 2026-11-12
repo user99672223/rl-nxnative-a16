@@ -4,8 +4,9 @@
 set -u
 B=$(ls -d "$RL_GAME_DIR"/*_build | head -1); out="$B/bc_astc.pack"
 if [ -s "$out" ] && [ "${RL_ASTC_REBUILD:-0}" != 1 ]; then echo "pack already made: $(du -h "$out" | cut -f1)"; exit 0; fi
-host="$B/tools/dmhost"; patched=$(ls -d "$B"/patched_* | head -1); romfs=$(ls -d "$B"/extract/*/RomFS 2>/dev/null | head -1)
-[ -n "$romfs" ] || { echo "no extracted RomFS folder (only an image?)"; ls "$B"/extract/*; exit 3; }
+host="$B/tools/dmhost"; patched=$(ls -d "$B"/patched_* | head -1); romfs=$(ls "$B"/extract/*/RomFS.img 2>/dev/null | head -1)
+[ -n "$romfs" ] || romfs=$(ls -d "$B"/extract/*/RomFS 2>/dev/null | head -1)
+[ -n "$romfs" ] || { echo "no extracted RomFS"; ls "$B"/extract/*; exit 3; }
 T="$B/tools/astc"; mkdir -p "$T"
 if [ ! -x "$T/bc2astc" ]; then
   # Arm's astcenc (Apache 2.0), built here: not part of this repository
