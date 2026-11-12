@@ -7,12 +7,14 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <Metal/Metal.h>
 #import <AVFAudio/AVFAudio.h>
+#import <GameController/GameController.h>
 #include <errno.h>
 #include "front.h"
 #include "hle.h"
 #include "dm.h"
 #include "haptics_apple.h"
 #include "save_sync.h"
+#include "dm_perf.h"
 #import "CloudSaves.h"
 
 void dm_gamepad_active(void);
@@ -61,6 +63,7 @@ static UILabel *front_ios_fps_label(void);
 }
 @end
 static void tv_attach(void);
+static void diag_layout(void);
 
 @interface DmRootView : UIView
 @end
@@ -176,6 +179,9 @@ static void launcher_done(void) { [g_root startGame]; }
     [self showFPS:fps ? atoi(fps) != 0 : [[NSBundle.mainBundle objectForInfoDictionaryKey:@"DMShowFPS"] boolValue]];
     [self.view setNeedsLayout]; [self.view layoutIfNeeded];
     UIApplication.sharedApplication.idleTimerDisabled = YES;
+    // The diagnostic panel has the phone's whole screen only while a controller is connected (else the phone is the pad): it follows controllers coming and going
+    for (NSNotificationName n in @[GCControllerDidConnectNotification, GCControllerDidDisconnectNotification])
+        [NSNotificationCenter.defaultCenter addObserverForName:n object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *x) { (void)x; diag_layout(); }];
     tv_attach();   // a TV connected while the launcher showed
     front_ios_boot();
 }
@@ -208,7 +214,7 @@ static void launcher_done(void) { [g_root startGame]; }
         CGRect s = CGRectIntersection(layout.controls, UIEdgeInsetsInsetRect(b, gameInsets));
         CGFloat u = layout.separated ? MIN(MIN(s.size.height / 430.0, s.size.width / 700.0), 1.3) : MIN(b.size.height / 430.0, 1.3);
         self.fps.frame = CGRectMake(floor(CGRectGetMinX(s) + 130 * u), floor(CGRectGetMinY(s) + 22 * u - 11), 64, 22);
-    }
+    }    diag_layout();
 }
 - (void)showFPS:(BOOL)on {   // the frame-rate counter: DM_SHOW_FPS at Play, then the in-game menu
     if (on && !self.fps) { self.fps = front_ios_fps_label(); [self.view addSubview:self.fps]; [self.view setNeedsLayout]; }   // above the pad, which hides while a controller is connected
@@ -242,22 +248,79 @@ UIViewController *front_ios_root(void) { return [DmRootVC new]; }
 - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; for (UIView *v in self.view.subviews) v.frame = dm_aspect_fit(self.view.bounds, g_picture_aspect); }
 @end
 static UIWindow *g_tv; static int g_tv_mode_was = -1;
+// The widest the picture is drawn on a TV or monitor, in pixels: DM_TV_WIDTH (1920, 2560 or 3840; 0 = the display's own pixels), 1920 without it
+static CGFloat tv_width_cap(void) {
+    const char *e = getenv("DM_TV_WIDTH"); long w = e ? atol(e) : 1920;
+    if (e && !w && !strcmp(e, "0")) return 16384;
+    return w >= 640 && w <= 7680 ? (CGFloat)w : 1920;
+}
+// Asks the display for the mode that fits the cap best: the one exactly cap wide and 16:9 (2560x1440 for a 1440p monitor), else the widest 16:9 one not wider than the cap, else
+// what the display prefers. A display reports its modes by cable; AirPlay has one. Logged either way, since which modes a monitor offers an iPhone cannot be known beforehand
+static void tv_pick_mode(UIScreen *screen, CGFloat cap) {
+    if (!screen) return;
+    UIScreenMode *best = nil; NSMutableString *list = [NSMutableString string];
+    for (UIScreenMode *m in screen.availableModes) {
+        CGSize z = m.size; [list appendFormat:@" %.0fx%.0f", z.width, z.height];
+        BOOL wide = fabs(z.width * 9 - z.height * 16) < 16 * 8;   // 16:9 within 8 lines
+        if (!wide || z.width > cap + 0.5) continue;
+        if (!best || z.width > best.size.width) best = m;
+    }
+    if (!best) best = screen.preferredMode;
+    CGSize was = screen.currentMode.size;
+    if (best && best != screen.currentMode) screen.currentMode = best;
+    LOG("front end: display modes:%s; asked for %.0fx%.0f (was %.0fx%.0f, output cap %.0f)", list.UTF8String, best.size.width, best.size.height, was.width, was.height, cap);
+}
+// ---- The diagnostic panel (DiagPanel.swift): the phone's whole screen while the picture is on a TV and a controller is connected, else an overlay at the right ----
+void *dm_diag_panel_vc(bool fullScreen); void dm_diag_set_fullscreen(bool on);
+static UIViewController *g_diag;
+static BOOL diag_full(void) { return g_tv != nil && g_root.game && g_root.game.superview != g_root.view && GCController.controllers.count > 0; }
+static BOOL diag_auto(void) { const char *e = getenv("DM_PANEL"); return !e || atoi(e) != 0; }   // DM_PANEL=0: only the in-game menu opens it
+bool dm_diag_shown(void) { return g_diag != nil; }
+bool dm_tv_connected(void) { return g_tv != nil; }
+static void diag_layout(void) {
+    if (!g_diag) return;
+    CGRect b = g_root.view.bounds; BOOL full = diag_full(); dm_diag_set_fullscreen(full);
+    if (full) { g_diag.view.frame = b; g_diag.view.layer.cornerRadius = 0; }
+    else {
+        UIEdgeInsets in = g_root.view.safeAreaInsets; CGFloat w = MIN(380, floor(b.size.width * 0.46));
+        g_diag.view.frame = CGRectMake(b.size.width - in.right - w - 8, in.top + 8, w, b.size.height - in.top - in.bottom - 16);
+        g_diag.view.layer.cornerRadius = 12; g_diag.view.clipsToBounds = YES;
+    }
+    [g_root.view bringSubviewToFront:g_diag.view];
+}
+void dm_diag_show(bool on) {
+    if (!NSThread.isMainThread) { dispatch_async(dispatch_get_main_queue(), ^{ dm_diag_show(on); }); return; }
+    if (on == (g_diag != nil) || !g_root.game) return;
+    if (on) {
+        g_diag = (__bridge_transfer UIViewController *)dm_diag_panel_vc(diag_full());
+        [g_root addChildViewController:g_diag]; [g_root.view addSubview:g_diag.view]; [g_diag didMoveToParentViewController:g_root];
+        diag_layout();
+    } else {
+        [g_diag willMoveToParentViewController:nil]; [g_diag.view removeFromSuperview]; [g_diag removeFromParentViewController]; g_diag = nil;
+    }
+    LOG("front end: diagnostic panel %s", on ? (diag_full() ? "shown on the phone's whole screen (the picture is on a TV)" : "shown as an overlay") : "hidden");
+}
 static void tv_attach(void) {
     DmGameView *v = g_root.game; if (!g_tv || !v || v.superview == g_tv.rootViewController.view) return;
-    // at most 1080p: the game renders 1080p docked, and a 4K drawable only adds an upscale and a 4K stream (an AirPlay TV showed black, the GPU went from 15 to 60 ms a frame).
-    // Taken from the picture, not the screen, so a display of another shape still gets the full 1920 pixels across the picture (DmGameView layoutSubviews applies it)
-    v.maxPixelWidth = 1920;
+    // at most 1080p by default: the game renders 1080p docked, and a 4K drawable only adds an upscale and a 4K stream (an AirPlay TV showed black, the GPU went from 15 to 60 ms a frame).
+    // Taken from the picture, not the screen, so a display of another shape still gets the full 1920 pixels across the picture (DmGameView layoutSubviews applies it).
+    // DM_TV_WIDTH (the launcher's Monitor output) names another width: 2560 for a 1440p monitor on the cable, where the present's upscaler (DM_PRESENT_UPSCALE) fills it from the
+    // game's picture; the display is asked for its mode of that width when it has one (tv_pick_mode)
+    CGFloat cap = tv_width_cap();
+    tv_pick_mode(g_tv.windowScene.screen, cap);
+    v.maxPixelWidth = cap;
     [g_tv.rootViewController.view addSubview:v]; [g_tv.rootViewController.view setNeedsLayout]; [g_root.view setNeedsLayout];   // the phone's pad takes the whole screen
-    CGRect f = dm_aspect_fit(g_tv.bounds, g_picture_aspect); CGFloat scale = MIN(g_tv.windowScene.screen.nativeScale, 1920.0 / MAX(f.size.width, 1));
+    CGRect f = dm_aspect_fit(g_tv.bounds, g_picture_aspect); CGFloat scale = MIN(g_tv.windowScene.screen.nativeScale, cap / MAX(f.size.width, 1));
     if (g_tv_mode_was < 0) g_tv_mode_was = dm_opmode();
     dm_set_opmode(1); dm_gamepad_opmode_changed();
-    LOG("front end: TV connected (%.0fx%.0f points), the picture moves there at %.0fx%.0f, console mode", g_tv.bounds.size.width, g_tv.bounds.size.height, f.size.width * scale, f.size.height * scale);
+    LOG("front end: TV connected (%.0fx%.0f points), the picture moves there at %.0fx%.0f, console mode", g_tv.bounds.size.width, g_tv.bounds.size.height, f.size.width * scale, f.size.height * scale);    if (diag_auto()) dm_diag_show(true);   // the phone has no picture to show now: the diagnostic panel takes it (DiagPanel.swift)
+    else diag_layout();
 }
 static void tv_detach(void) {
     DmGameView *v = g_root.game; g_tv = nil; v.maxPixelWidth = 0;
     if (v && v.superview != g_root.view) { [g_root.view insertSubview:v atIndex:0]; [g_root.view setNeedsLayout]; }
     if (g_tv_mode_was >= 0) { dm_set_opmode(g_tv_mode_was); g_tv_mode_was = -1; dm_gamepad_opmode_changed(); }
-    LOG("front end: TV disconnected, the picture is back on the phone");
+    LOG("front end: TV disconnected, the picture is back on the phone");    diag_layout();   // a panel that had the screen becomes an overlay over the picture
 }
 void front_picture_shape(int w, int h) {   // front.h: the views take the presented picture's shape (a taller one under DM_SCREEN_ASPECT) instead of 16:9
     if (w <= 0 || h <= 0) return;
@@ -288,6 +351,17 @@ bool dm_setting_live(const char *env, const char *value) {
     if (!strcmp(env, "DM_SHOW_FPS")) { if (value) [g_root showFPS:atoi(value) != 0]; return true; }
     if (!strcmp(env, "DM_TOUCH_HAPTICS")) { if (value) dm_gamepad_touch_feedback(atoi(value) != 0); return true; }
     if (!strcmp(env, "DM_RUMBLE")) { if (value) { dm_haptics_set_enabled(atoi(value) != 0); LOG("front end: game rumble %s (in-game menu)", atoi(value) ? "on" : "off"); } return true; }
+    // The present's upscaler: read again at the next present (nvn_mtl.m)
+    if (!strcmp(env, "DM_PRESENT_UPSCALE")) { if (value) { void mtl_present_upscale_reload(void); mtl_present_upscale_reload(); dm_perf_mark([NSString stringWithFormat:@"DM_PRESENT_UPSCALE=%s", value].UTF8String); } return true; }
+    // The widest picture on a TV or monitor: the view on the TV is laid out again with the new cap, and the display asked for the matching mode
+    if (!strcmp(env, "DM_TV_WIDTH")) {
+        if (value) { if (g_tv && g_root.game.superview != g_root.view) { CGFloat cap = tv_width_cap(); tv_pick_mode(g_tv.windowScene.screen, cap); g_root.game.maxPixelWidth = cap; [g_root.game setNeedsLayout]; }
+                     dm_perf_mark([NSString stringWithFormat:@"DM_TV_WIDTH=%s", value].UTF8String); }
+        return true;
+    }
+    // Settings the host keeps in the game's own memory (hle_ue3set.c: render scale, dynamic resolution, an Unreal Engine 3 system setting by name) and the graphics layer's own (nvn_mtl.m)
+    { int dm_nx_setting_live(const char *env, const char *value); if (dm_nx_setting_live(env, value)) return true; }
+    { int mtl_setting_live(const char *env, const char *value); if (mtl_setting_live(env, value)) return true; }
     return false;
 }
 @interface DmTVSceneDelegate : UIResponder <UIWindowSceneDelegate>

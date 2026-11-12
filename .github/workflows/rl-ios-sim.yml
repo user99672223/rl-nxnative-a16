@@ -1,0 +1,74 @@
+# The iOS front end in the Simulator: the production gamepad, layout, in-game menu, diagnostic panel, performance log and monitor flow, driven by XCTest with synthetic host state
+# (dm/ios/tests/duo). No game files, keys or secrets. The pictures of the panel are synthetic UI; they are still encrypted to the owner's key like every other artifact.
+name: RL iOS Simulator tests
+on:
+  push:
+    branches: [main]
+    paths: ['dm/ios/**', 'dm/host/hle_perf.c', 'dm/host/dm_perf.h', '.github/workflows/rl-ios-sim.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rl-ios-sim-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+  HOMEBREW_NO_AUTO_UPDATE: 1
+
+jobs:
+  sim:
+    if: github.repository_owner == github.actor
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tools
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen >/dev/null 2>&1
+          command -v age >/dev/null || brew install age >/dev/null 2>&1
+          xcodebuild -version; xcrun simctl list runtimes | tail -5
+      - name: Pick a simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)['devices']; best=None
+          for rt,devs in sorted(d.items()):
+              if 'iOS' not in rt: continue
+              for x in devs:
+                  if 'iPhone' in x['name']: best=(rt,x['name'],x['udid']) if (best is None or '15' in x['name'] or best[0]<rt) and not (best and '15' in best[1] and '15' not in x['name']) else best
+          print(best[2] if best else '')
+          print(best, file=sys.stderr)")
+          test -n "$UDID" || { echo "::error::no iPhone simulator on this runner"; exit 1; }
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b | tail -1
+      - name: Build and test the harness
+        run: |
+          rm -rf /tmp/rl-sim-shots; mkdir -p /tmp/rl-sim-shots logs
+          cd dm/ios/tests/duo
+          xcodegen generate --spec project.yml >/dev/null
+          set -o pipefail
+          xcodebuild test -project DuoHarness.xcodeproj -scheme DuoHarness -destination "platform=iOS Simulator,id=$UDID" \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO -resultBundlePath "$RUNNER_TEMP/duo.xcresult" 2>&1 | tee "$GITHUB_WORKSPACE/logs/xcodebuild.log" \
+            | grep -E "error:|warning: unused|Test Case .*(passed|failed)|\*\* TEST|Executed [0-9]+ tests|: error|XCTAssert|failed -" | head -300
+      - name: Whole-screen pictures of the simulator
+        if: always()
+        run: |
+          xcrun simctl io "$UDID" screenshot /tmp/rl-sim-shots/simulator-screen.png >/dev/null 2>&1 || true
+          ls -la /tmp/rl-sim-shots | awk '{print $5, $9}'
+      - name: Encrypt the pictures and the log
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/up"
+          tar -C /tmp -cf - rl-sim-shots -C "$GITHUB_WORKSPACE" logs | age -r "$(cat scripts/rl/recipient.txt)" -o "$RUNNER_TEMP/up/rl-ios-sim-${{ github.run_number }}.tar.age"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: rl-enc-ios-sim-${{ github.run_number }}
+          path: ${{ runner.temp }}/up
+          retention-days: 14

@@ -16,6 +16,8 @@
 #include <math.h>
 #include <stdio.h>
 void front_picture_shape(int w, int h);   // front_ios.m (dm/host/front.h)
+#include "dm_perf.h"
+int dm_diag_export_now(char *out, int cap);   // DiagPanel.swift
 
 static NSArray<GCController *> *gDuoHarnessControllers;
 static BOOL gDuoHarnessControllerSwizzleInstalled;
@@ -1361,5 +1363,179 @@ static Class DuoHarnessInstallReservedRegionProbe(UIView *view) API_AVAILABLE(io
     }
 }
 
+
+
+// ---------- The diagnostic panel, the performance log, the monitor flow and a DualSense's layout (the Rocket League port; DiagPanel.swift, front_ios.m, dm/host/hle_perf.c) ----------
+// Pictures of each state go to /tmp/rl-sim-shots on the Mac running the Simulator (CI collects them) and into the test report.
+static void DuoFeedFrames(uint64_t from, int n, double ms) {
+    for (int i = 0; i < n; i++) {
+        dm_perf_frame(from + (uint64_t)i, ms + (i % 45 == 0 ? 11 : 0), ms * 0.55, 14, 950, 61.5, 58.0, i % 150 == 0);
+        if (i >= 8) dm_perf_gpu(from + (uint64_t)i - 8, ms * 0.6);
+    }
+}
+- (void)saveShotOf:(UIView *)view named:(NSString *)name {
+    UIGraphicsImageRenderer *r = [[UIGraphicsImageRenderer alloc] initWithBounds:view.bounds];
+    UIImage *img = [r imageWithActions:^(UIGraphicsImageRendererContext *c) { (void)c; [view drawViewHierarchyInRect:view.bounds afterScreenUpdates:YES]; }];
+    NSData *png = UIImagePNGRepresentation(img);
+    NSString *dir = @"/tmp/rl-sim-shots";
+    if (![NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil]) dir = NSTemporaryDirectory();
+    [png writeToFile:[dir stringByAppendingPathComponent:[name stringByAppendingString:@".png"]] atomically:YES];
+    XCTAttachment *a = [XCTAttachment attachmentWithImage:img]; a.name = name; a.lifetime = XCTAttachmentLifetimeKeepAlways; [self addAttachment:a];
+}
+- (void)spin:(NSTimeInterval)seconds { [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]]; }
+
+- (void)testPerformanceRecordSummarisesFrames {
+    uint64_t before = dm_perf_rows();
+    DuoFeedFrames(100000 + before, 600, 16.6);
+    XCTAssertEqual(dm_perf_rows(), before + 600);
+    dm_perf_sum s; dm_perf_window(before, before + 600, &s);
+    XCTAssertEqual(s.frames, 600u);
+    XCTAssertEqualWithAccuracy(s.frame_p50, 16.6, 0.05);
+    XCTAssertEqualWithAccuracy(s.frame_max, 27.6, 0.05, @"the stutters stay in the record");
+    XCTAssertEqualWithAccuracy(s.fps, 1000.0 / (16.6 + 11.0 / 45.0), 0.3);
+    XCTAssertEqualWithAccuracy(s.gpu_ms, 16.6 * 0.6, 0.05, @"GPU times arrive 8 frames late and land on their frames");
+    XCTAssertEqualWithAccuracy(s.draws, 950, 0.5); XCTAssertEqualWithAccuracy(s.passes, 14, 0.5);
+    dm_perf_row rows[16]; int n = dm_perf_recent(rows, 16);
+    XCTAssertEqual(n, 16); XCTAssertEqual(rows[15].frame, (uint32_t)(100000 + before + 599));
+    XCTAssertEqual(rows[15].mem_mb, 2600, @"each row carries what iOS counts against the app");
+}
+
+- (void)testDiagnosticPanelIsAnOverlayWithoutAMonitor {
+    UIViewController *root = [self harnessRootViewController];
+    XCTAssertNotNil(root); [root.view layoutIfNeeded];
+    DuoFeedFrames(200000 + dm_perf_rows(), 400, 16.7);
+    XCTAssertFalse(dm_tv_connected());
+    dm_diag_show(true);
+    XCTAssertTrue(dm_diag_shown());
+    [root.view layoutIfNeeded]; [self spin:0.6];
+    UIViewController *panel = root.childViewControllers.lastObject;
+    XCTAssertNotNil(panel);
+    CGRect f = panel.view.frame, b = root.view.bounds;
+    XCTAssertLessThan(f.size.width, b.size.width * 0.5, @"over the picture, the panel leaves most of it visible: %@", NSStringFromCGRect(f));
+    XCTAssertTrue(CGRectContainsRect(b, f));
+    XCTAssertGreaterThan(CGRectGetMinX(f), b.size.width * 0.4, @"at the right, away from the left stick");
+    [self saveShotOf:root.view named:@"panel-overlay"];
+    dm_diag_show(false);
+    XCTAssertFalse(dm_diag_shown());
+    XCTAssertFalse([root.childViewControllers containsObject:panel]);
+}
+
+- (void)testDiagnosticPanelExportsThePerformanceLog {
+    UIViewController *root = [self harnessRootViewController]; [root.view layoutIfNeeded];
+    DuoFeedFrames(300000 + dm_perf_rows(), 300, 16.7);
+    dm_perf_mark("DM_UE3_SCALE=0.75");
+    DuoFeedFrames(300300 + dm_perf_rows(), 300, 13.2);
+    char path[1024] = "";
+    XCTAssertEqual(dm_diag_export_now(path, (int)sizeof path), 0);
+    NSString *json = @(path);
+    XCTAssertTrue([json hasSuffix:@".json"]);
+    XCTAssertTrue([json containsString:@"/Documents/perf/perf-"], @"where the Files app shows it: %@", json);
+    NSData *jd = [NSData dataWithContentsOfFile:json]; XCTAssertNotNil(jd);
+    NSDictionary *o = [NSJSONSerialization JSONObjectWithData:jd options:0 error:nil];
+    XCTAssertEqualObjects(o[@"format"], @"nxnative performance log 1");
+    XCTAssertNotNil(o[@"info"][@"device"]); XCTAssertNotNil(o[@"info"][@"settings"]);
+    NSArray *st = o[@"stretches"]; XCTAssertGreaterThanOrEqual(st.count, 2u);
+    NSDictionary *last = st.lastObject;
+    XCTAssertEqualObjects(last[@"change"], @"DM_UE3_SCALE=0.75", @"a change made while playing starts a stretch of its own");
+    XCTAssertEqualWithAccuracy([last[@"frame_ms"][@"p50"] doubleValue], 13.2, 0.05);
+    XCTAssertEqualWithAccuracy([o[@"memory_mb"][@"in_use"] doubleValue], 2600, 1);
+    NSString *csv = [[json stringByDeletingPathExtension] stringByAppendingPathExtension:@"csv"];
+    NSString *text = [NSString stringWithContentsOfFile:csv encoding:NSUTF8StringEncoding error:nil]; XCTAssertNotNil(text);
+    NSArray<NSString *> *lines = [text componentsSeparatedByString:@"\n"];
+    XCTAssertTrue([lines.firstObject hasPrefix:@"frame,t_s,frame_ms,cpu_ms,gpu_ms,draws,passes"]);
+    XCTAssertEqual(lines.count, (NSUInteger)[o[@"frames"] unsignedLongLongValue] + 2, @"a header, a row a frame, the last newline");
+}
+
+- (void)testPanelSettingsReachTheHostAtOnce {
+    XCTAssertTrue(dm_setting_live("DM_UE3_SCALE", NULL) && dm_setting_live("DM_UE3_DYNRES", NULL) && dm_setting_live("DM_ANISO", NULL)
+                  && dm_setting_live("DM_PRESENT_UPSCALE", NULL) && dm_setting_live("DM_TV_WIDTH", NULL));
+    dm_setting_live("DM_UE3_SCALE", "0.70"); XCTAssertEqualObjects(@(duo_harness_live_last()), @"DM_UE3_SCALE=0.70");
+    dm_setting_live("DM_ANISO", "4"); XCTAssertEqualObjects(@(duo_harness_live_last()), @"DM_ANISO=4");
+    dm_setting_live("DM_PRESENT_UPSCALE", "metalfx"); XCTAssertEqualObjects(@(duo_harness_live_last()), @"upscale reload");
+}
+
+- (void)testMonitorSceneTakesThePictureAt1440pAndThePanelTakesThePhone {
+    UIViewController *root = [self harnessRootViewController]; [root.view layoutIfNeeded];
+    UIView *game = [root valueForKey:@"game"]; CAMetalLayer *metal = (CAMetalLayer *)game.layer;
+    UIWindowScene *scene = root.view.window.windowScene; XCTAssertNotNil(scene);
+    DuoFeedFrames(400000 + dm_perf_rows(), 400, 16.7);
+    int mode_was = dm_opmode();
+    setenv("DM_TV_WIDTH", "2560", 1); setenv("DM_PANEL", "1", 1);
+    // The monitor's scene: iOS hands the app a scene of the external-display role; its delegate is what the Info.plist and the scene accessory name. Here it is given the test
+    // host's own scene, so its window stands in for the monitor's
+    id<UIWindowSceneDelegate> tv = [NSClassFromString(@"DmTVSceneDelegate") new]; XCTAssertNotNil(tv);
+    [tv scene:scene willConnectToSession:scene.session options:(UISceneConnectionOptions *)nil];
+    UIWindow *tvw = [(id)tv valueForKey:@"window"]; XCTAssertNotNil(tvw);
+    XCTAssertTrue(dm_tv_connected());
+    XCTAssertEqual(game.superview, tvw.rootViewController.view, @"the picture moves to the monitor");
+    XCTAssertEqual(dm_opmode(), 1, @"docked, as a Switch on its dock");
+    [tvw.rootViewController.view setNeedsLayout]; [tvw.rootViewController.view layoutIfNeeded]; [game layoutIfNeeded];
+    CGFloat want = MIN(game.bounds.size.width * tvw.windowScene.screen.nativeScale, 2560.0);
+    XCTAssertEqualWithAccuracy(metal.drawableSize.width, want, 1.5, @"the drawable is set explicitly, at most 2560 across (DM_TV_WIDTH)");
+    XCTAssertEqualWithAccuracy(metal.drawableSize.height / metal.drawableSize.width, game.bounds.size.height / game.bounds.size.width, 0.01);
+    XCTAssertLessThanOrEqual(metal.drawableSize.width, 2560.5);
+    // a cap below the stand-in's own pixels shows the cap is what sets the size
+    dm_setting_live("DM_TV_WIDTH", "1920"); setenv("DM_TV_WIDTH", "640", 1); dm_setting_live("DM_TV_WIDTH", "640"); [game layoutIfNeeded];
+    XCTAssertEqualWithAccuracy(metal.drawableSize.width, MIN(want, 640.0), 1.5);
+    setenv("DM_TV_WIDTH", "2560", 1); dm_setting_live("DM_TV_WIDTH", "2560"); [game layoutIfNeeded];
+
+    XCTAssertTrue(dm_diag_shown(), @"with the picture away, the phone shows the diagnostic panel");
+    [root.view layoutIfNeeded]; [self spin:0.6];
+    UIViewController *panel = root.childViewControllers.lastObject;
+    XCTAssertLessThan(panel.view.frame.size.width, root.view.bounds.size.width * 0.5, @"no controller: the phone is the pad, the panel stays at the side");
+    [self saveShotOf:root.view named:@"monitor-phone-pad-and-panel"];
+    if (@available(iOS 13.0, *)) {
+        GCController *pad = [GCController controllerWithExtendedGamepad];
+        [self setHarnessControllers:@[pad] notification:GCControllerDidConnectNotification];
+        [self spin:0.3]; [root.view setNeedsLayout]; [root.view layoutIfNeeded]; [self spin:0.5];
+        XCTAssertTrue(CGRectEqualToRect(panel.view.frame, root.view.bounds), @"a controller connected: the panel has the phone's whole screen: %@", NSStringFromCGRect(panel.view.frame));
+        [self saveShotOf:root.view named:@"monitor-phone-panel-full"];
+        [self saveShotOf:tvw named:@"monitor-picture-window"];
+        [self setHarnessControllers:@[] notification:GCControllerDidDisconnectNotification];
+    }
+    [tv sceneDidDisconnect:scene];
+    XCTAssertFalse(dm_tv_connected());
+    XCTAssertEqual(game.superview, root.view, @"unplugged: the picture is back on the phone");
+    XCTAssertEqual(dm_opmode(), mode_was);
+    [root.view setNeedsLayout]; [root.view layoutIfNeeded]; [self spin:0.3];
+    XCTAssertTrue(dm_diag_shown());
+    XCTAssertLessThan(panel.view.frame.size.width, root.view.bounds.size.width * 0.5, @"and the panel is an overlay again");
+    [self saveShotOf:root.view named:@"unplugged-overlay"];
+    dm_diag_show(false);
+    unsetenv("DM_TV_WIDTH"); unsetenv("DM_PANEL");
+}
+
+// A DualSense is an extended gamepad to GameController: cross / circle / square / triangle arrive as buttonA / B / X / Y by position (bottom, right, left, top), which is where a
+// Switch Pro Controller has B / A / Y / X; Create is buttonOptions (−), Options is buttonMenu (+)
+- (void)testDualSenseControlsMapToTheProControllerByPosition {
+    if (@available(iOS 13.0, *)) {
+        GCController *ds = [GCController controllerWithExtendedGamepad];
+        [self setHarnessControllers:@[ds] notification:GCControllerDidConnectNotification];
+        CGRect bounds = CGRectMake(0, 0, 844, 390);
+        (void)[self padForLayout:dm_layout(bounds, UIEdgeInsetsZero, NO, CGRectNull, DM_PICTURE_16_9) bounds:bounds];
+        GCExtendedGamepad *g = ds.extendedGamepad;
+        struct { GCControllerButtonInput *b; uint64_t want; const char *what; } map[] = {
+            {g.buttonA, DM_BTN_B, "cross (bottom) → B"}, {g.buttonB, DM_BTN_A, "circle (right) → A"}, {g.buttonX, DM_BTN_Y, "square (left) → Y"}, {g.buttonY, DM_BTN_X, "triangle (top) → X"},
+            {g.leftShoulder, DM_BTN_L, "L1 → L"}, {g.rightShoulder, DM_BTN_R, "R1 → R"}, {g.leftTrigger, DM_BTN_ZL, "L2 → ZL"}, {g.rightTrigger, DM_BTN_ZR, "R2 → ZR"},
+            {g.buttonMenu, DM_BTN_PLUS, "Options → +"}, {g.buttonOptions, DM_BTN_MINUS, "Create → −"},
+            {g.leftThumbstickButton, DM_BTN_LS, "L3 → left stick press"}, {g.rightThumbstickButton, DM_BTN_RS, "R3 → right stick press"},
+        };
+        for (size_t i = 0; i < sizeof map / sizeof *map; i++) {
+            if (!map[i].b) continue;   // a snapshot without that control
+            [self deliverSnapshotChangeFor:ds button:map[i].b value:1];
+            XCTAssertEqual(duo_harness_state().players[0].buttons & map[i].want, map[i].want, @"%s", map[i].what);
+            [self deliverSnapshotChangeFor:ds button:map[i].b value:0];
+            XCTAssertEqual(duo_harness_state().players[0].buttons & map[i].want, 0ull, @"%s released", map[i].what);
+        }
+        struct { float x, y; uint64_t want; } dir[] = {{0, 1, DM_BTN_UP}, {0, -1, DM_BTN_DOWN}, {-1, 0, DM_BTN_LEFT}, {1, 0, DM_BTN_RIGHT}};
+        GCExtendedGamepadValueChangedHandler handler = g.valueChangedHandler;
+        for (size_t i = 0; handler && i < 4; i++) {
+            [g.dpad setValueForXAxis:dir[i].x yAxis:dir[i].y]; handler(g, g.dpad);
+            XCTAssertEqual(duo_harness_state().players[0].buttons & (DM_BTN_UP | DM_BTN_DOWN | DM_BTN_LEFT | DM_BTN_RIGHT), dir[i].want, @"D-pad direction %zu", i);
+        }
+        if (handler) { [g.dpad setValueForXAxis:0 yAxis:0]; handler(g, g.dpad); }
+        [self setHarnessControllers:@[] notification:GCControllerDidDisconnectNotification];
+    }
+}
 
 @end

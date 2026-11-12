@@ -13,6 +13,8 @@ targets:
       - path: ../../Sources/LauncherSettings.swift
       - path: ../../Sources/DmGamepad.m
       - path: ../../Sources/front_ios.m
+      - path: ../../Sources/DiagPanel.swift
+      - path: ../../../host/hle_perf.c
     dependencies:
       - sdk: UIKit.framework
       - sdk: GameController.framework

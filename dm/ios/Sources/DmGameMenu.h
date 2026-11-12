@@ -11,6 +11,9 @@ int dm_pad_layout(void);   // DmGamepad.m: 0 = 2D, 1 = 3D, 2 = Tap (DM_GAME_PAD_
 bool dm_pad_layout_offered(int layout);   // Tap only in handheld mode
 void dm_pad_layout_set(int layout);   // releases every touch first, and is saved for the next start
 void dm_gamepad_touch_feedback(bool on);   // DM_TOUCH_HAPTICS
+void dm_diag_show(bool on);   // front_ios.m: the diagnostic panel (DiagPanel.swift) over the game, or on the phone's whole screen while a TV shows the picture
+bool dm_diag_shown(void);
+bool dm_tv_connected(void);   // a TV or monitor shows the picture
 bool dm_setting_live(const char *env, const char *value);   // front_ios.m: value NULL asks whether the running game takes env at once; otherwise applies it
 #ifdef __cplusplus
 }

@@ -37,3 +37,10 @@ DM_PSO_PREBUILD	toggle	-	1	gfxapi:nvn	Performance	Pipeline prebuild	The first st
 DM_NVN_ENC_THREAD	toggle	-	1|DM_GAME_ENC_THREAD	gfxapi:nvn	Performance	Encode thread
 DM_FPS_HOLD	toggle	on/off	DM_GAME_FPS_HOLD	DM_GAME_FPS_TARGET!=0	Performance	Hold frames when late
 DM_METAL_HUD	toggle	-	0	always	Performance	Performance HUD
+# ---- Settings for a monitor and for watching performance (first used by Rocket League on an iPhone 15: the picture on a monitor by cable, the diagnostic panel on the phone) ----
+DM_TV_WIDTH	choice	1920=1080p,2560=1440p,3840=4K,0=The display's own	1920	platform:ios	Game	Monitor output	The size the picture is drawn at on a TV or monitor. Above the game's own size it is scaled up (Upscaling); larger costs GPU time.
+DM_ANISO	choice	0=Game's own,1=Off,2=2x,4=4x,8=8x,16=16x	0	gfxapi:nvn	Performance	Anisotropic filtering	Sharper textures at an angle; higher levels cost GPU time.
+DM_PANEL	toggle	-	1	platform:ios	Performance	Diagnostics on the phone	With the picture on a monitor and a controller connected, the phone shows the diagnostic panel.
+DM_UE3_SCALE	range	0.5:1.0:0.05	1.0	DM_GAME_UE3_SETTINGS!=0	Game	Render scale	Below 100 % the 3D picture is fixed at that size and the game's dynamic resolution is off.	level=basic
+DM_UE3_DYNRES	choice	game=Game's own,off=Off	game	DM_GAME_UE3_SETTINGS!=0	Game	Dynamic resolution	Off keeps the full size for the console mode. Ignored while Render scale is below 100 %.
+DM_UE3_DYNRES_MIN	range	0.5:1.0:0.05	0.5	DM_GAME_UE3_SETTINGS!=0	Game	Dynamic resolution floor		needs=DM_UE3_DYNRES=game

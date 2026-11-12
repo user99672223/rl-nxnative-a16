@@ -32,6 +32,7 @@ typedef struct {
 } DuoHarnessState;
 
 DuoHarnessInput duo_harness_input(void);
+const char *duo_harness_live_last(void);   // the last setting the diagnostic panel's stubs were handed, "ENV=value"
 int duo_harness_rumble(void);   // the in-game menu's rumble switch (dm_haptics_set_enabled)
 void dm_set_opmode(int mode);
 int dm_opmode(void);

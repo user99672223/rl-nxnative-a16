@@ -121,3 +121,22 @@ const char *front_ios_boot_message(void) { return NULL; }
 const char *front_ios_device_check(void) { return NULL; }   // a supported GPU
 void dm_cloud_saves_env(void) {}
 int save_sync_flush(int timeout_ms) { (void)timeout_ms; return 1; }
+
+// ---------- The diagnostic panel's host side (DiagPanel.swift; the performance record itself is the real dm/host/hle_perf.c) ----------
+static char g_live_last[160];
+const char *duo_harness_live_last(void) { return g_live_last; }
+int dm_nx_setting_live(const char *env, const char *value) {   // hle_ue3set.c: the settings kept in the game's memory
+    if (!env || strncmp(env, "DM_UE3", 6)) return 0;
+    if (value) snprintf(g_live_last, sizeof g_live_last, "%s=%s", env, value);
+    return 1;
+}
+int mtl_setting_live(const char *env, const char *value) {   // nvn_mtl.m: the graphics layer's own
+    if (!env || strcmp(env, "DM_ANISO")) return 0;
+    if (value) snprintf(g_live_last, sizeof g_live_last, "%s=%s", env, value);
+    return 1;
+}
+void mtl_present_upscale_reload(void) { snprintf(g_live_last, sizeof g_live_last, "upscale reload"); }
+void dm_mem_now(uint64_t *use, uint64_t *peak, uint64_t *budget, uint64_t *avail, uint64_t *metal) {   // memstat.m: a phone a third below its limit
+    if (use) *use = 2600ull << 20; if (peak) *peak = 3100ull << 20; if (budget) *budget = 4000ull << 20; if (avail) *avail = 1350ull << 20; if (metal) *metal = 900ull << 20;
+}
+void mtl_perf_sizes(uint32_t *rw, uint32_t *rh, uint32_t *ow, uint32_t *oh) { *rw = 1600; *rh = 900; *ow = 2560; *oh = 1440; }

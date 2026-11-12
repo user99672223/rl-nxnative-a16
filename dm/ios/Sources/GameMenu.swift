@@ -30,6 +30,8 @@ private func gameMenuItems() -> [UIMenuElement] {
         }
     }
     if !placed { items.insert(UIMenu(options: .displayInline, children: [layout]), at: 0) }
+    // The diagnostic panel (DiagPanel.swift): figures, every live setting with sliders, and the performance log's export
+    items.append(UIMenu(options: .displayInline, children: [UIAction(title: "Diagnostics", image: UIImage(systemName: "waveform.path.ecg"), state: dm_diag_shown() ? .on : .off) { _ in dm_diag_show(!dm_diag_shown()) }]))
     return items
 }
 

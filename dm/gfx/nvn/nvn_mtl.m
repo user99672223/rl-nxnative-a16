@@ -7009,6 +7009,30 @@ static MTLSamplerAddressMode wrapm(int w) {
         case 6: return MTLSamplerAddressModeMirrorRepeat; }
     return MTLSamplerAddressModeRepeat;
 }
+static _Atomic int g_aniso_override = -1;   // DM_ANISO: 0 = the game's own, 1..16 a level for trilinear samplers; -1 = not read yet
+static int aniso_override(void) {
+    int v = atomic_load(&g_aniso_override);
+    if (v < 0) { const char *e = getenv("DM_ANISO"); v = e ? atoi(e) : 0; if (v < 0 || v > 16) v = 0; atomic_store(&g_aniso_override, v); if (v) MLOG("anisotropic filtering: level %d for every trilinear sampler (DM_ANISO)", v); }
+    return v;
+}
+// The graphics layer's own settings that change while the game runs (the diagnostic panel, the in-game menu). value NULL: whether env is one; otherwise applies it. 1 when it is one.
+// DM_ANISO: every cached sampler state is dropped and made again at its next use with the new level (as a re-registration drops one, mtl_reg_samp)
+int mtl_setting_live(const char *env, const char *value) {
+    if (!env || strcmp(env, "DM_ANISO")) return 0;
+    if (!value) return 1;
+    int v = atoi(value); if (v < 0 || v > 16) v = 0;
+    os_unfair_lock_lock(&g_rmu);
+    atomic_store(&g_aniso_override, v);
+    for (int i = 0; i < g_nsreg; i++) {
+        if (!g_sreg_ok[i] || !(g_sview[i] || g_sview_w[i])) continue;
+        if (g_sview[i]) { CFRelease(g_sview[i]); g_sview[i] = NULL; g_srid[i] = 0; }
+        if (g_sview_w[i]) { CFRelease(g_sview_w[i]); g_sview_w[i] = NULL; g_srid_w[i] = 0; }
+        reg_bump(i, 1);
+    }
+    os_unfair_lock_unlock(&g_rmu);
+    MLOG("anisotropic filtering: %s (DM_ANISO=%d), samplers are made again at their next use", v ? "a fixed level for trilinear samplers" : "the game's own", v);
+    return 1;
+}
 static id<MTLSamplerState> samp_by_id(int sid) {   // Caller holds g_rmu
     if (sid < 0 || sid >= g_nsreg || !g_sreg_ok[sid]) { RED_ONCE(12, "sampler ID %d not registered", sid); return nil; }
     if (g_sview[sid]) return (__bridge id<MTLSamplerState>)g_sview[sid];
@@ -7021,6 +7045,9 @@ static id<MTLSamplerState> samp_by_id(int sid) {   // Caller holds g_rmu
     d.lodMinClamp = p.lod_min < 0 ? 0 : p.lod_min; d.lodMaxClamp = p.lod_max;
     d.lodBias = p.lod_bias < -16 ? -16 : p.lod_bias > 15.99f ? 15.99f : p.lod_bias;   // SetLodBias: Maxwell's sampler bias, Metal 26's range [-16, 15.99]
     d.maxAnisotropy = p.aniso < 1 ? 1 : p.aniso > 16 ? 16 : (NSUInteger)p.aniso;
+    // DM_ANISO (the player's Anisotropic filtering): a level for every sampler that filters across mip levels (trilinear, the ones a game puts on world textures), whatever the
+    // game asked for; 1 turns anisotropy off, which is the cheapest on a tile-based GPU. Samplers that compare, reduce or do not filter mips keep the game's own
+    { int ov = aniso_override(); if (ov > 0 && d.mipFilter == MTLSamplerMipFilterLinear && d.minFilter == MTLSamplerMinMagFilterLinear && !p.cmp_mode && !p.reduction) d.maxAnisotropy = (NSUInteger)ov; }
     if (p.cmp_mode) d.compareFunction = (MTLCompareFunction)(p.cmp_func - 1);
     // Reduction (NVN 1 min / 2 max): the minimum or maximum of the texels a filtered sample covers, per channel (Metal 26). Pokémon Legends: Z-A builds its depth pyramid with a min sampler
     // (151607c7a92386cc reads the level above at an explicit LOD) and tests occlusion boxes against it; averaged, the pyramid is nearer than the scene at depth edges. Metal ignores the reduction
@@ -15987,6 +16014,7 @@ typedef struct { id<MTL4FXSpatialScaler> sc; id<MTLTexture> in, out; uint64_t ma
 static fx_state g_fx_present;   // only the present thread encodes or replaces the scaler
 static id<MTL4Compiler> g_fx_comp;
 static int g_fx_mode = -1;   // 1 = metalfx, 0 = off
+void mtl_present_upscale_reload(void) { g_fx_mode = -1; }   // DM_PRESENT_UPSCALE changed while the game runs: fx_mode reads it again at the next present
 static int fx_mode(void) {
     if (g_fx_mode >= 0) return g_fx_mode;
     const char *e = getenv("DM_PRESENT_UPSCALE"); int v = 0;
