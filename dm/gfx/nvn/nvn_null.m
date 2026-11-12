@@ -71,7 +71,14 @@ static void null_commit(MTL4CommitOptions *o) {
     atomic_fetch_add(&g_null_commits, 1);
     if (![(id)o isKindOfClass:[DmNullCommitOptions class]]) return;
     NSArray *hs = [((DmNullCommitOptions *)(id)o)->handlers copy];
-    if (hs.count) dispatch_async(g_nq, ^{ for (void (^h)(id) in hs) h(g_null); });
+    if (!hs.count) return;
+    // A GPU holds the submitter back when it falls behind; here nothing does, and on a loaded machine the handlers lagged more than the replay's ring of 128 commits
+    // ("post ring: the writes of fence N never ran"). So a commit waits while 16 are still to be reported, unless it comes from a handler itself
+    static _Atomic int flying; static char key;
+    static dispatch_once_t once; dispatch_once(&once, ^{ dispatch_queue_set_specific(g_nq, &key, &key, NULL); });
+    if (!dispatch_get_specific(&key)) for (int w = 0; w < 250 && atomic_load(&flying) >= 16; w++) usleep(200);   // 50 ms at most: a handler may need a lock the committer holds
+    atomic_fetch_add(&flying, 1);
+    dispatch_async(g_nq, ^{ for (void (^h)(id) in hs) h(g_null); atomic_fetch_sub(&flying, 1); });
 }
 - (void)commit:(const id<MTL4CommandBuffer> _Nonnull[_Nonnull])cbs count:(NSUInteger)n { (void)cbs; (void)n; atomic_fetch_add(&g_null_commits, 1); }
 - (void)commit:(const id<MTL4CommandBuffer> _Nonnull[_Nonnull])cbs count:(NSUInteger)n options:(MTL4CommitOptions *)o { (void)cbs; (void)n; null_commit(o); }
