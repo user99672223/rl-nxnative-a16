@@ -126,3 +126,13 @@ Addresses are offsets into the 1.0 `main` (build `becfed979bb4204fbd0945cd450fb2
 
 **Risk.** A real-time thread that runs past its declaration is demoted for tens of milliseconds; the declaration follows the measured peak to avoid it. Two real-time threads and the game's main thread now compete for the A16's two performance cores.
 
+## 15. The scene stayed 1280x720 inside a bigger screen
+
+**Found (iPhone 15, Render resolution 1440p and 1080p).** The picture was the game's frame at 1280x720 in the top-left corner of the screen, the rest left over from earlier frames: half the width and height at 1440p, two thirds at 1080p. Item 8 held ResX / ResY, which sized the window and (with item 13) the render targets, but the 3D view never grew: a pass dump at 2560x1440 (run 43483309451) has viewports and scissors of 0,0,1280,720 on 2560x1440 targets. The view's size comes from the scene render targets' table of dynamic-resolution steps (object at the pointer `main+0x2d0cdd0`, table `+0xab8`, entries `+0xaac`, current step `+0xaa8`, read by `main+0x80a17c`), filled once at window creation (`main+0x809fd8`) with constants: 1280x720, 1152x648, 1024x576, 896x504, 768x432. Nothing in the game reads the display or the console mode to size the scene.
+
+**Changed.** Stub `res_table` (`dm/games/01005EE0036EC000/patches.py`): the table is filled from the held ResX / ResY in the game's own steps of a tenth, rounded down to 8 pixels. At 1280x720 it is the shipped table; at 2560x1440 it is 2560x1440, 2304x1296, 2048x1152, 1792x1008, 1536x864.
+
+**Earlier claims withdrawn.** The 1440p measurements in items 11 to 13 and in PROGRESS (passes, MB a frame, memory) were of a 1280x720 scene drawn into 2560x1440 targets, not of a 1440p scene. CI never showed this because the null GPU draws no picture.
+
+**Risk.** The game's dynamic resolution now steps down from the larger size (to 60 % at most); the GPU cost of 1440p is about four times 720p's.
+

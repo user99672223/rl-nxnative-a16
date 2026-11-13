@@ -60,6 +60,10 @@ static NSArray<NSString *> *romfs_document_images(NSString *doc) {
 // full build runs from its own files as before. Kept out of device backups
 #include <sys/clonefile.h>
 #include <errno.h>
+// iOS keeps an app's bundle and its Documents on different volumes (clonefile: "Cross-device link" on an iPhone 15, iOS 27.2), so a clone is tried and a copy follows:
+// on a thread of its own, at low priority, into <name>.seed and renamed when complete, only when the phone has the room plus 2 GB to spare. The game reads the bundle's
+// files meanwhile. The copy costs the storage of the data once more until a slim build replaces the full one, whose bundle then no longer holds them
+#include <copyfile.h>
 static void data_seed_one(NSString *src, NSString *dst) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSDictionary *sa = [fm attributesOfItemAtPath:src error:nil], *da = [fm attributesOfItemAtPath:dst error:nil];
@@ -67,19 +71,35 @@ static void data_seed_one(NSString *src, NSString *dst) {
     if (da && da.fileSize == sa.fileSize) return;
     [fm createDirectoryAtPath:dst.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *tmp = [dst stringByAppendingString:@".seed"]; [fm removeItemAtPath:tmp error:nil];
-    if (clonefile(src.fileSystemRepresentation, tmp.fileSystemRepresentation, 0)) { fprintf(stderr, "boot: %s could not be kept in Documents (clonefile: %s); slim updates need it there\n", src.lastPathComponent.UTF8String, strerror(errno)); return; }
+    int how = 0;   // 1 clone, 2 copy
+    if (!clonefile(src.fileSystemRepresentation, tmp.fileSystemRepresentation, 0)) how = 1;
+    else {
+        int err = errno;
+        NSDictionary *fs = [fm attributesOfFileSystemForPath:dst.stringByDeletingLastPathComponent error:nil];
+        unsigned long long room = [fs[NSFileSystemFreeSize] unsignedLongLongValue];
+        if (room < sa.fileSize + (2ull << 30)) { fprintf(stderr, "boot: %s not kept in Documents: no clone (%s) and %.1f GB free, %.1f GB needed\n", src.lastPathComponent.UTF8String, strerror(err), room / 1e9, (sa.fileSize + (2ull << 30)) / 1e9); return; }
+        double t0 = CFAbsoluteTimeGetCurrent();
+        if (copyfile(src.fileSystemRepresentation, tmp.fileSystemRepresentation, NULL, COPYFILE_DATA)) { fprintf(stderr, "boot: %s could not be copied into Documents (%s)\n", src.lastPathComponent.UTF8String, strerror(errno)); [fm removeItemAtPath:tmp error:nil]; return; }
+        NSDictionary *ta = [fm attributesOfItemAtPath:tmp error:nil];
+        if (ta.fileSize != sa.fileSize) { fprintf(stderr, "boot: %s copy came out %llu of %llu bytes; dropped\n", src.lastPathComponent.UTF8String, ta.fileSize, sa.fileSize); [fm removeItemAtPath:tmp error:nil]; return; }
+        fprintf(stderr, "boot: %s copied into Documents in %.1f s\n", src.lastPathComponent.UTF8String, CFAbsoluteTimeGetCurrent() - t0);
+        how = 2;
+    }
     [fm removeItemAtPath:dst error:nil];
     if (![fm moveItemAtPath:tmp toPath:dst error:nil]) { [fm removeItemAtPath:tmp error:nil]; return; }
     [[NSURL fileURLWithPath:dst] setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
-    fprintf(stderr, "boot: %s kept in Documents for slim updates (%.0f MB, a clone)\n", dst.lastPathComponent.UTF8String, sa.fileSize / 1048576.0);
+    fprintf(stderr, "boot: %s kept in Documents for slim updates (%.0f MB, %s)\n", dst.lastPathComponent.UTF8String, sa.fileSize / 1048576.0, how == 1 ? "a clone" : "a copy");
 }
 static void data_seed(NSString *doc, NSString *res) {
     NSFileManager *fm = NSFileManager.defaultManager;
     if ([fm fileExistsAtPath:[res stringByAppendingPathComponent:@"romfs.id"]] || [fm fileExistsAtPath:[[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"programs.txt"]]) return;   // upstream's own slim build, and games of several programs: as they were
-    data_seed_one([res stringByAppendingPathComponent:@"romfs.img"], [doc stringByAppendingPathComponent:@"romfs.img"]);
-    data_seed_one([[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"bc_astc.pack"], [doc stringByAppendingPathComponent:@"bc_astc.pack"]);
+    NSMutableArray<NSArray<NSString *> *> *pairs = [NSMutableArray array];
+    [pairs addObject:@[[res stringByAppendingPathComponent:@"romfs.img"], [doc stringByAppendingPathComponent:@"romfs.img"]]];
+    [pairs addObject:@[[[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"bc_astc.pack"], [doc stringByAppendingPathComponent:@"bc_astc.pack"]]];
     NSString *msl = [res stringByAppendingPathComponent:@"msl"];
-    for (NSString *n in [fm contentsOfDirectoryAtPath:msl error:nil]) if ([n hasSuffix:@".img"]) data_seed_one([msl stringByAppendingPathComponent:n], [[doc stringByAppendingPathComponent:@"msl"] stringByAppendingPathComponent:n]);
+    for (NSString *n in [fm contentsOfDirectoryAtPath:msl error:nil]) if ([n hasSuffix:@".img"]) [pairs addObject:@[[msl stringByAppendingPathComponent:n], [[doc stringByAppendingPathComponent:@"msl"] stringByAppendingPathComponent:n]]];
+    // in the background: a copy of 6 GB must not hold up the start, and the game reads the bundle's files until the next (slim) install
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ for (NSArray<NSString *> *p in pairs) @autoreleasepool { data_seed_one(p[0], p[1]); } });
 }
 static NSString *romfs_locate(NSString *prog) {   // prog: a game of several programs, the running program's folder in the app (p<N>); nil otherwise
     NSFileManager *fm = NSFileManager.defaultManager;

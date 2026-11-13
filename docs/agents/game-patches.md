@@ -37,6 +37,7 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 | `build` → `game` | render intervals, the forced-interval flag and the render-wait timeout | frame rate | gap | judgement | 1 | [Fire Emblem: Three Houses](../../dm/games/010055D009F78000/README.md) | the game's own tables, flag and timeout |
 | `build` → `game` | task ring push and pop barriers | race | gap | judgement | 1 | [Batman: Arkham Knight](../../dm/games/0100ACD0163D0000/README.md) | a data race in the game's own task ring |
 | `build` → `game` | the render-target pool's size follows the held ResX | memory | gap | judgement | 1 | [Rocket League](../../dm/games/01005EE0036EC000/README.md) | the port's own pool sizes, constants in its RHI start |
+| `build` → `game` | the scene's dynamic-resolution sizes follow the held ResX / ResY | rendering | gap | judgement | 1 | [Rocket League](../../dm/games/01005EE0036EC000/README.md) | a table of constants in the port's scene render targets |
 | `build` → `game` | UE3's GMalloc setup skipped, the host allocator in (hle_uemalloc.c) | address space | gap | judgement | 1 | [Batman: Arkham Knight](../../dm/games/0100ACD0163D0000/README.md) | UE3 inlines the allocator's constructor into the GMalloc setup and has its own vtable layout (25 slots, 32-bit sizes), so the Unreal 4/5 discovery does not apply |
 | `build` → `game` | unused 272-byte slot pool: 4,194,304 → 65,536 slots | address space | gap | judgement | 1 | [Mario + Rabbids® Sparks of Hope](../../dm/games/0100317013770000/README.md) | Sparks of Hope's own init (Kingdom Battle has none) |
 | `build` → `sdk` | VammManager node area and alignment, SDK 4.4.0 (9de92bad) | address space | blocked: one game ships it | judgement | 1 | [sdk_patches.py](../../dm/tools/sdk_patches.py) | an older implementation no rule covers (its large regions aligned to 32 MB, not the rules' 2 MB); a rule once a second game ships it |
@@ -79,7 +80,7 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 | [Ori and the Will of the Wisps](#ori-and-the-will-of-the-wisps) | 0 | 0 | 10 | 0 | 0 | `build` → `engine` |
 | [Paper Mario: The Thousand-Year Door](#paper-mario-the-thousand-year-door) | 1 | 0 | 1 | 0 | 0 | `build` → `game` |
 | [Pokémon Legends: Arceus](#pokémon-legends-arceus) | 0 | 0 | 0 | 1 | 0 | `game` |
-| [Rocket League](#rocket-league) | 0 | 0 | 2 | 0 | 3 | `build` → `game`, `build` → `engine` ×3 |
+| [Rocket League](#rocket-league) | 0 | 0 | 3 | 0 | 3 | `build` → `game` ×2, `build` → `engine` ×3 |
 | [Super Mario 3D All-Stars: Super Mario Sunshine](#super-mario-3d-all-stars-super-mario-sunshine) | 2 | 0 | 0 | 0 | 0 | `build` → `game` |
 | [Super Smash Bros. Ultimate](#super-smash-bros-ultimate) | 11 | 0 | 0 | 1 | 0 | `game` |
 | [Taiko Risshiden V DX](#taiko-risshiden-v-dx) | 1 | 0 | 0 | 2 | 0 | `game` |
@@ -468,12 +469,14 @@ Every patch bound tighter than it could be: the open gaps, then the blocked, kep
 
 [Rocket League](../../dm/games/01005EE0036EC000/README.md), `01005EE0036EC000`, [patches.py](../../dm/games/01005EE0036EC000/patches.py).
 
+- **`build` → `game`**, rendering, gap, judgement: the scene's dynamic-resolution sizes follow the held ResX / ResY. A table of constants in the port's scene render targets
 - **`build` → `game`**, memory, gap, judgement: the render-target pool's size follows the held ResX. The port's own pool sizes, constants in its RHI start
 - **`build` → `engine`**, rendering, gap, judgement: RHIKickCommandBuffer returns at once while the host's flag is set. Unreal Engine 3's kick in Panic Button's NVN RHI; a function-matched rule could carry it to the game's updates
 - **`build` → `engine`**, frame rate, blocked: one game on this engine version here, judgement: Unreal Engine 3's frame-rate smoothing held flat (GEngine's MinSmoothedFrameRate at fixed offsets). UEngine's fields, the same in any game on this engine version; found by GetMaxTickRate's shape they could be read from the code
 - **`build` → `engine`**, rendering, gap, judgement: the host's flag of Rocket League's RHIKickCommandBuffer gate (its patches.py). Follows the rewriter stub of the same build
 
-- **1.0.0 `main`** `becfed97…` ([patches.py:59](../../dm/games/01005EE0036EC000/patches.py#L59))
+- **1.0.0 `main`** `becfed97…` ([patches.py:101](../../dm/games/01005EE0036EC000/patches.py#L101))
+  - stub `+0x80a00c`: the scene's dynamic-resolution sizes follow the held ResX / ResY (1280x720 and its tenths as shipped)
   - stub `+0xa95968`: RHIKickCommandBuffer returns at once while the host's flag is set (the frame's passes stay open across the renderer's kicks)
   - stub `+0xab4698`: the render-target pool's size follows the held ResX (286 MB at 720p, 656 MB above it, 1,152 MB above 1080p)
   - host [hle_ue3set.c:138](../../dm/host/hle_ue3set.c#L138): Unreal Engine 3's frame-rate smoothing held flat

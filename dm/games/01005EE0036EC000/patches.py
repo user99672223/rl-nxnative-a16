@@ -53,13 +53,57 @@ def target_pool(ctx):
     ctx.put(_POOL, [B(_POOL, start)], "the render-target pool's size follows the held ResX (286 MB at 720p, 656 MB above it, 1,152 MB above 1080p)")
 
 
-def stubs(ctx): kick_gate(ctx); target_pool(ctx)
+# 1.0.0 (v0) main: the scene's sizes. The scene render targets' object (FSceneRenderTargets, at the pointer main+0x2d0cdd0) keeps a table of the sizes its dynamic resolution
+# steps through (+0xab8, +0xaac entries, the current step at +0xaa8), filled once when the window is made (main+0x809fd8): 1280x720, 1152x648, 1024x576, 896x504, 768x432,
+# constants. Every scene view takes its size from the current step (main+0x80a17c), so with ResX / ResY held at 2560x1440 the targets and the window were 2560x1440 and the scene
+# was still drawn 1280x720 into their top-left corner, the rest left as it was (an iPhone 15, Render resolution 1440p: half the width and height; 1080p: two thirds; pass dump
+# of run 43483309451: viewports 0,0,1280,720 on 2560x1440 targets). The stub fills the table from the held ResX / ResY instead, in the game's own steps of a tenth
+# (100 %, 90 %, 80 % ...), rounded down to 8 pixels; at the game's own 1280x720 the table is the one it had.
+_RTAB, _RTAB_FIRST, _RTAB_END = 0x80a00c, '08a08052', 0x80a06c
+
+
+def res_table(ctx):
+    here, emit = ctx.here, ctx.emit
+    ctx.site(_RTAB, _RTAB_FIRST)
+    start = here()
+    ldrw = lambda t, n, off: 0xB9400000 | (off // 4) << 10 | n << 5 | t
+    strw = lambda t, n, off: 0xB9000000 | (off // 4) << 10 | n << 5 | t
+    movz = lambda t, imm: 0x52800000 | imm << 5 | t
+    emit(ADRP(16, here(), _RESX))                       # x16 is free here (the function's own registers are x19, x29, x30)
+    emit(ldrw(9, 16, _RESX & 0xfff))                    # w9 = ResX
+    emit(ldrw(10, 16, (_RESX + 4) & 0xfff))             # w10 = ResY
+    emit(0x35000000 | 3 << 5 | 9)                       # cbnz w9, +3: a size was set
+    emit(movz(9, 1280)); emit(movz(10, 720))
+    emit(ldrw(11, 19, 0xaac))                           # w11 = entries
+    emit(movz(8, 0)); emit(movz(17, 10))
+    loop = here()
+    emit(0x6B00001F | 11 << 16 | 8 << 5)                # cmp w8, w11
+    emit(0x54000000 | 16 << 5 | 2)                      # b.hs end (16 words on: the 15 of the loop's body and its branch back)
+    emit(0x4B000000 | 8 << 16 | 17 << 5 | 12)           # sub w12, w17, w8        tenths
+    for d, src in ((13, 9), (14, 10)):
+        emit(0x1B000000 | 12 << 16 | 31 << 10 | src << 5 | d)   # mul wd, wsrc, w12
+        emit(0x1AC00800 | 17 << 16 | d << 5 | d)                 # udiv wd, wd, w17
+        emit(0x53000000 | 3 << 16 | 31 << 10 | d << 5 | d)       # lsr wd, wd, #3
+        emit(0x53000000 | 29 << 16 | 28 << 10 | d << 5 | d)      # lsl wd, wd, #3
+    emit(0xF9400000 | (0xab8 // 8) << 10 | 19 << 5 | 15)         # ldr x15, [x19, #0xab8]
+    emit(0x8B204C00 | 8 << 16 | 15 << 5 | 15)                    # add x15, x15, w8, uxtw #3
+    emit(strw(13, 15, 0)); emit(strw(14, 15, 4))
+    emit(0x11000400 | 8 << 5 | 8)                                # add w8, w8, #1
+    emit(B(here(), loop))
+    assert here() == loop + 4 * 17, 'res_table: the loop body changed length; fix the b.hs offset'
+    emit(B(here(), _RTAB_END))
+    ctx.put(_RTAB, [B(_RTAB, start)], "the scene's dynamic-resolution sizes follow the held ResX / ResY (1280x720 and its tenths as shipped)")
+
+
+def stubs(ctx): kick_gate(ctx); target_pool(ctx); res_table(ctx)
 
 
 STUBS = {'becfed979bb4204fbd0945cd450fb296': stubs}   # 1.0.0 (v0) main
 
 # How general each patch is and could be (dm/tools/docs_patches.py "Binding", listed in docs/agents/game-patches.md)
 BINDING = [
+    {'what': "the scene's dynamic-resolution sizes follow the held ResX / ResY", 'now': 'build', 'goal': 'game', 'purpose': 'rendering',
+     'why': "a table of constants in the port's scene render targets"},
     {'what': "the render-target pool's size follows the held ResX", 'now': 'build', 'goal': 'game', 'purpose': 'memory',
      'why': "the port's own pool sizes, constants in its RHI start"},
     {'what': "RHIKickCommandBuffer returns at once while the host's flag is set", 'now': 'build', 'goal': 'engine', 'purpose': 'rendering',
