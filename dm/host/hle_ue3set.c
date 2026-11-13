@@ -231,15 +231,19 @@ static int ue3_kick_build(void) {   // the builds whose patches.py has the kick 
     for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main")) return !strcmp(g_mod[i].build_id, "becfed979bb4204fbd0945cd450fb296");
     return 0;
 }
+// A Render resolution above the game's own 1280 across: the game's dynamic resolution must be off. While AllowDynamicResolution is set its scene renderer sizes every view
+// from fixed 1280x720 (main+0xa761f8: the flag at GSystemSettings+0x414 picks 0x500 x 0x2d0 instead of the viewport's size), so a 2560x1440 window got a 1280x720 scene in its
+// top-left corner (an iPhone 15; run 43483309451: viewports 0,0,1280,720 on 2560x1440 targets, run 43483328388 with it off: 0,0,2560,1440)
+static int ue3_res_above_game(void) { unsigned w = 0, h = 0; const char *r = getenv("DM_UE3_RES"); return r && sscanf(r, "%ux%u", &w, &h) == 2 && w > 1280; }
 static void nx_apply(const char *env, const char *v, int live) {
     char note[160]; snprintf(note, sizeof note, "%s=%s", env, v ? v : "");
     if (!strcmp(env, "DM_UE3_SCALE")) {
         float s = v ? strtof(v, NULL) : 1.0f;
-        if (!(s >= 0.25f && s < 0.9999f)) { dm_ue3_set("ScreenPercentage", ""); if (!getenv("DM_UE3_DYNRES") || strcmp(getenv("DM_UE3_DYNRES"), "off")) dm_ue3_set("AllowDynamicResolution", ""); }
+        if (!(s >= 0.25f && s < 0.9999f)) { dm_ue3_set("ScreenPercentage", ""); dm_ue3_set("AllowDynamicResolution", (getenv("DM_UE3_DYNRES") && !strcmp(getenv("DM_UE3_DYNRES"), "off")) || ue3_res_above_game() ? "0" : ""); }
         else { char p[16]; snprintf(p, sizeof p, "%g", s * 100.0f); dm_ue3_set("ScreenPercentage", p); dm_ue3_set("AllowDynamicResolution", "0"); }
     } else if (!strcmp(env, "DM_UE3_DYNRES")) {
         const char *rs = getenv("DM_UE3_SCALE"); int scaled = rs && strtof(rs, NULL) < 0.9999f && strtof(rs, NULL) >= 0.25f;
-        dm_ue3_set("AllowDynamicResolution", v && !strcmp(v, "off") ? "0" : scaled ? "0" : "");
+        dm_ue3_set("AllowDynamicResolution", v && !strcmp(v, "off") ? "0" : scaled || ue3_res_above_game() ? "0" : "");
     } else if (!strcmp(env, "DM_UE3_DYNRES_MIN")) {
         float s = v ? strtof(v, NULL) : 0; if (s >= 0.25f && s <= 1.0f) { char p[16]; snprintf(p, sizeof p, "%g", s); dm_ue3_set("MinimumScreenScale", p); } else dm_ue3_set("MinimumScreenScale", "");
     } else if (!strcmp(env, "DM_UE3_RES")) {
@@ -247,7 +251,7 @@ static void nx_apply(const char *env, const char *v, int live) {
         // corner of the old targets (an iPhone 15, the in-game menu's Render resolution changed during a match). The launcher keeps the value for the next start
         if (live) { LOG("ue3 settings: render resolution %s is for the next start of the game (its targets are made when it starts)", v ? v : "game"); return; }
         // The size the game renders at (its window, viewport and render targets; 1280x720 as shipped): read by the engine when it starts, so a change takes a restart
-        unsigned w = 0, h = 0; if (v && sscanf(v, "%ux%u", &w, &h) == 2 && w >= 640 && w <= 3840 && h >= 360 && h <= 2160) { char a[16], b[16]; snprintf(a, sizeof a, "%u", w); snprintf(b, sizeof b, "%u", h); dm_ue3_set("ResX", a); dm_ue3_set("ResY", b); }
+        unsigned w = 0, h = 0; if (v && sscanf(v, "%ux%u", &w, &h) == 2 && w >= 640 && w <= 3840 && h >= 360 && h <= 2160) { char a[16], b[16]; snprintf(a, sizeof a, "%u", w); snprintf(b, sizeof b, "%u", h); dm_ue3_set("ResX", a); dm_ue3_set("ResY", b);  if (w > 1280) dm_ue3_set("AllowDynamicResolution", "0"); }
         else { dm_ue3_set("ResX", ""); dm_ue3_set("ResY", ""); }
     } else if (!strcmp(env, "DM_UE3_KICK")) {
         // The renderer's mid-frame kicks (RHIKickCommandBuffer), gated by the rewriter's stub on a setting no code reads (dm/games/01005EE0036EC000/patches.py): merge = no
