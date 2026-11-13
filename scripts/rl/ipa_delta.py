@@ -8,6 +8,9 @@ so a build also publishes everything else (the executable and the small files, a
   ipa_delta.py slim  <old.ipa> <delta.zip> <slim.ipa> laptop: an IPA of the update alone, for a phone whose installed full build already keeps the large files
                                                       in its Documents (dm/ios/Sources/main.m data_seed); fails like apply if a large file differs
 
+  ipa_delta.py drop  <in.ipa> <out.ipa> <name>...      laptop: the IPA without the named large files (by file name), copied as packed; for a phone that already keeps
+                                                      those in its Documents (its log says "kept in Documents" for each)
+
 Large = 256 MiB or more. Large entries are copied as they are packed (no recompression), so applying takes about as long as copying the file."""
 import json, shutil, struct, sys, zipfile
 
@@ -76,7 +79,19 @@ def slim(old, delta, new):
             with zd.open(i) as f: o.writestr(i, f.read(), compress_type=zipfile.ZIP_DEFLATED if i.file_size else zipfile.ZIP_STORED)
     print(f'{new}: {sum(1 for m in man if not m["big"])} entries, without {", ".join(m["name"].split("/")[-1] for m in man if m["big"])}')
 
+def drop(src, out, names):
+    zi = zipfile.ZipFile(src); left = []
+    with zipfile.ZipFile(out, 'w', allowZip64=True) as o:
+        for i in zi.infolist():
+            if i.filename.split('/')[-1] in names: left.append(i.filename); continue
+            raw_copy(zi, i, o)
+    got = {i.filename: (i.file_size, i.CRC) for i in zipfile.ZipFile(out).infolist()}
+    bad = [i.filename for i in zi.infolist() if i.filename not in left and got.get(i.filename) != (i.file_size, i.CRC)]
+    if bad: raise SystemExit(f'{out} does not match {src}: {bad[:5]}')
+    print(f'{out}: without {", ".join(n.split("/")[-1] for n in left)}')
+
 if len(sys.argv) >= 4 and sys.argv[1] == 'make': make(sys.argv[2], sys.argv[3])
 elif len(sys.argv) >= 5 and sys.argv[1] == 'apply': apply(sys.argv[2], sys.argv[3], sys.argv[4])
 elif len(sys.argv) >= 5 and sys.argv[1] == 'slim': slim(sys.argv[2], sys.argv[3], sys.argv[4])
+elif len(sys.argv) >= 5 and sys.argv[1] == 'drop': drop(sys.argv[2], sys.argv[3], set(sys.argv[4:]))
 else: sys.exit(__doc__)
