@@ -98,8 +98,9 @@ static void data_seed(NSString *doc, NSString *res) {
     [pairs addObject:@[[[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"bc_astc.pack"], [doc stringByAppendingPathComponent:@"bc_astc.pack"]]];
     NSString *msl = [res stringByAppendingPathComponent:@"msl"];
     for (NSString *n in [fm contentsOfDirectoryAtPath:msl error:nil]) if ([n hasSuffix:@".img"]) [pairs addObject:@[[msl stringByAppendingPathComponent:n], [[doc stringByAppendingPathComponent:@"msl"] stringByAppendingPathComponent:n]]];
-    // in the background: a copy of 6 GB must not hold up the start, and the game reads the bundle's files until the next (slim) install
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ for (NSArray<NSString *> *p in pairs) @autoreleasepool { data_seed_one(p[0], p[1]); } });
+    // in the background: a copy of 6 GB must not hold up the start, and the game reads the bundle's files until the next (slim) install. User-initiated, not utility: an iPhone 15
+    // copied the first two files (10 s each) and never finished the 3.6 GB shader library at utility priority while the game ran (its I/O is throttled)
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ for (NSArray<NSString *> *p in pairs) @autoreleasepool { data_seed_one(p[0], p[1]); } });
 }
 static NSString *romfs_locate(NSString *prog) {   // prog: a game of several programs, the running program's folder in the app (p<N>); nil otherwise
     NSFileManager *fm = NSFileManager.defaultManager;
@@ -222,6 +223,10 @@ static int boot_env(void) {
     // The memory watcher (memstat.m): its constructor starts it only when NX_MEMORY_BUDGET_MB is in the launch environment, which a sideloaded app never has. Without this
     // call the first device log had 0 MiB in every row, and a budget in env.txt was never read
     { extern void dm_mem_budget_start(void); dm_mem_budget_start(); }
+    // Rocket League test builds (2026-11-14): one frame's passes into the log every 45 s, for the scene drawn into part of a 1440p screen in matches (docs/optimizations.md
+    // item 15), which only a device reaches. An env file's or the launch environment's DM_NVN_PASSDUMP wins; DM_NVN_PASSDUMP=off there turns it off. Remove once that is fixed
+    if (!getenv("DM_NVN_PASSDUMP")) setenv("DM_NVN_PASSDUMP", "every:2700", 0);
+    else if (!strcmp(getenv("DM_NVN_PASSDUMP"), "off")) unsetenv("DM_NVN_PASSDUMP");
     front_hud_env();   // an env file's DM_METAL_HUD; nothing in this process makes a Metal device before startGame (front_ios.m), which applies the launcher's
     // Game language (nn::oe::GetDesiredLanguage, hle_oe.c): the one the IPA was packed with (the NSP script's LANGUAGE / --language → DMLanguage in Info.plist), unless an env file sets DM_LANG
     // (or the launcher, which replaces this default before the game starts)

@@ -5001,6 +5001,25 @@ static inline int passdump(void) {
 // The next n frames' passes, on request (the Mac's DM_CTL "passdump n", hle_hid.c): for a scene that a fixed DM_NVN_PASSDUMP frame range cannot be timed to
 void dm_gfx_passdump_next(long n) { long f = (long)atomic_load(&g_cur_frame); g_pd_a1 = f + n; g_pd_a0 = f + 1; }
 #define PD(...) do { if (passdump()) { flockfile(stderr); fprintf(stderr, "[pass] F%llu ", (unsigned long long)atomic_load(&g_cur_frame)); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); funlockfile(stderr); } } while (0)
+// Render-size census (always on, a few hundred bytes): the first draw of each pass by its target's size, its viewport's and its scissor's, logged every 600 frames with the
+// passes a frame of each. For a game whose picture is drawn into part of its targets (Rocket League at a Render resolution above its own: an iPhone 15 showed the scene in a
+// corner of a 1440p screen in some arenas, which the menu frames CI can reach never showed), what sizes the frames of a match use, without a pass dump
+typedef struct { uint32_t k[6]; uint32_t n; } census_e;
+static census_e g_census[64]; static int g_ncensus; static uint64_t g_census_f0;
+static void size_census(uint32_t tw, uint32_t th, uint32_t vw, uint32_t vh, uint32_t sw, uint32_t sh) {
+    uint32_t k[6] = {tw, th, vw, vh, sw, sh}; uint64_t f = atomic_load(&g_cur_frame);
+    if (!g_census_f0) g_census_f0 = f;
+    if (f >= g_census_f0 + 600 && g_ncensus) {
+        char line[2048]; size_t o = 0; double nf = (double)(f - g_census_f0);
+        for (int a = 0; a < g_ncensus; a++) for (int b = a + 1; b < g_ncensus; b++) if (g_census[b].n > g_census[a].n) { census_e t = g_census[a]; g_census[a] = g_census[b]; g_census[b] = t; }
+        for (int i = 0; i < g_ncensus && i < 16 && o < sizeof line - 96; i++) { census_e *e = &g_census[i];
+            o += snprintf(line + o, sizeof line - o, " %ux%u vp %ux%u sc %ux%u: %.1f;", e->k[0], e->k[1], e->k[2], e->k[3], e->k[4], e->k[5], e->n / nf); }
+        MLOG("render sizes up to frame %llu (target, viewport, scissor of each pass's first draw: passes a frame):%s", (unsigned long long)f, line);
+        g_ncensus = 0; g_census_f0 = f;
+    }
+    for (int i = 0; i < g_ncensus; i++) if (!memcmp(g_census[i].k, k, sizeof k)) { g_census[i].n++; return; }
+    if (g_ncensus < 64) { memcpy(g_census[g_ncensus].k, k, sizeof k); g_census[g_ncensus++].n = 1; }
+}
 static void blit_note(void) { if (g_enc) PD("E %llu copy / buffer update ends the render pass", g_stat_pass); }
 __attribute__((weak)) void dm_guest_frame_tick(void) {}   // hle_os.c provides the strong definition (DM_DETCLOCK deterministic guest clock); a no-op when graphics unit tests do not link the host   // diag.c provides the strong definition (DM_TICK_HOLD=E:SHOT unfreeze); a no-op when graphics unit tests do not link the host
 __attribute__((weak)) void dm_cheats_present(void) {}   // hle_cheats.c provides the strong definition (the Atmosphère cheat pass per presented frame); a no-op when graphics unit tests do not link the host
@@ -14381,6 +14400,7 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
             } }
         if (last_pass != g_stat_pass) {
             last_pass = g_stat_pass;
+            size_census((uint32_t)tw, (uint32_t)th, S.has_vp ? (uint32_t)S.vp[0][2] : (uint32_t)tw, S.has_vp ? (uint32_t)S.vp[0][3] : (uint32_t)th, (uint32_t)sc.width, (uint32_t)sc.height);
             PD("D %llu prim=%d vc=%d inst=%d blend=%#x wm=%#x dt=%d dw=%d df=%d st=%d sc=%lu,%lu,%lu,%lu tgt=%lux%lu vp=%.0f,%.0f,%.0f,%.0f dr=%g,%g lo=%u", g_stat_pass, prim,
                dw ? dw->count : di->count, dw ? dw->instances : di->instances, S.color.blend_en, S.chmask.mask, (int)S.ds.dt, (int)S.ds.dw, (int)S.ds.df, (int)S.ds.st,
                (unsigned long)sc.x, (unsigned long)sc.y, (unsigned long)sc.width, (unsigned long)sc.height, (unsigned long)tw, (unsigned long)th,
