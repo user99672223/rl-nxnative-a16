@@ -237,6 +237,13 @@ What the two logs and the performance export show:
 
 Not measured on the device yet: the inline fences (item 11), the replay thread's deadline (item 14), native 1440p from the start of the game.
 
+## Device state at the owner's stop (2026-11-14)
+
+- Installed: build f29debe4 (run 43527039381). 720p (Render resolution "Game's own") is correct and holds 60 fps.
+- 1440p: UI full screen; the match scene still partly drawn (photos `../RL/device/drop3/`). Device pass dumps (`../RL/device/drop4/`, first draw of each pass only) show every pass at 2560x1440, so the fault is inside a pass or in frames not dumped. Suspect: depth of field's half-size buffer (DepthOfField=1). Next: dump every draw plus a screenshot at the same frames (commit 3612d9f8, build cancelled: the owner stopped testing).
+- 1440p cost: GPU about 19 ms a frame, about 50 fps, peak 2,593 MiB.
+- Slim updates: romfs.img and bc_astc.pack copied into Documents on the phone; the shader library copy not confirmed in a log.
+
 ## CI loops (all manual-dispatch or push to main; logs with game data are encrypted)
 
 | What | How | Time |
