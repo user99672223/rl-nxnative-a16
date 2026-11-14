@@ -225,7 +225,17 @@ static int boot_env(void) {
     { extern void dm_mem_budget_start(void); dm_mem_budget_start(); }
     // Rocket League test builds (2026-11-14): one frame's passes into the log every 45 s, for the scene drawn into part of a 1440p screen in matches (docs/optimizations.md
     // item 15), which only a device reaches. An env file's or the launch environment's DM_NVN_PASSDUMP wins; DM_NVN_PASSDUMP=off there turns it off. Remove once that is fixed
-    if (!getenv("DM_NVN_PASSDUMP")) setenv("DM_NVN_PASSDUMP", "every:2700", 0);
+    // Every draw of those frames (a pass's own scissors and viewports, not only its first draw's), and the picture shown at about the same frames as PNGs in Documents
+    // (shot_<frame>.png, 1.5 MB each, 40 at most): the first device dumps had every pass at 2560x1440 while the owner still saw the scene partly drawn
+    if (!getenv("DM_NVN_PASSDUMP")) {
+        setenv("DM_NVN_PASSDUMP", "every:2700", 0); setenv("DM_NVN_PASSDUMP_ALL", "1", 0);
+        if (!getenv("DM_NVN_SHOT")) {
+            NSMutableString *fr = [NSMutableString string];
+            for (int k = 0; k < 40; k++) [fr appendFormat:@"%s%d", k ? "," : "", 1350 + 2700 * k];
+            NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
+            setenv("DM_NVN_SHOT", [NSString stringWithFormat:@"%@:%@/shot_%%d.png", fr, docs].UTF8String, 0);
+        }
+    }
     else if (!strcmp(getenv("DM_NVN_PASSDUMP"), "off")) unsetenv("DM_NVN_PASSDUMP");
     front_hud_env();   // an env file's DM_METAL_HUD; nothing in this process makes a Metal device before startGame (front_ios.m), which applies the launcher's
     // Game language (nn::oe::GetDesiredLanguage, hle_oe.c): the one the IPA was packed with (the NSP script's LANGUAGE / --language → DMLanguage in Info.plist), unless an env file sets DM_LANG
